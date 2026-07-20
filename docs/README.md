@@ -15,3 +15,4 @@ Read in this order:
 - Dropped MoviePy and OpenCV from MVP video stack ([ADR 0003](adr/0003-video-stack-scope.md))
 - Dropped face/emotion/object detection from MVP metadata; no speaker diarization in Phase 1 ([ADR 0004](adr/0004-metadata-extraction-scope.md))
 - Resolved `timeline` vs `cuts` ambiguity in the edit-plan contract; `timeline` is the sole rendering authority ([ADR 0005](adr/0005-edit-plan-schema.md))
+- Claude primary / OpenRouter fallback for edit-plan generation, also covering the spec's "Gemini fallback" need ([ADR 0006](adr/0006-edit-plan-llm-fallback.md))

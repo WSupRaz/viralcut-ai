@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Optional fallback ASR provider, used only if the OpenAI call fails.
     groq_api_key: str = ""
 
+    anthropic_api_key: str = ""
+    # Optional fallback edit-plan provider, used only if the Claude call fails.
+    openrouter_api_key: str = ""
+
     @property
     def sync_database_url(self) -> str:
         """DATABASE_URL is asyncpg-flavored for the FastAPI service; workers

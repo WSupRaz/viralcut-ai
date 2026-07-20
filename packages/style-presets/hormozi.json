@@ -1,0 +1,12 @@
+{
+  "name": "Alex Hormozi",
+  "slug": "hormozi",
+  "description": "High-energy, fast-cut talking-head style popularized by Alex Hormozi.",
+  "rules": {
+    "cut_pacing": "Cut every 1.5-3 seconds. Remove dead air, filler words (um, uh, like, you know), and repeated phrases aggressively -- silence is the enemy.",
+    "captions": "Bold, animated captions on every spoken word. Highlight 1-3 key words per sentence in a contrasting color to emphasize the core claim.",
+    "zooms": "Punch zoom (scale 1.15-1.4) on emphasized words or key statements. Hold the zoom through the phrase, then release back to normal scale.",
+    "transitions": "Hard cuts only. No crossfades or slow transitions -- speed is the point.",
+    "tone": "High energy, direct, confident. No slow build-ups -- get to the point immediately and keep momentum throughout."
+  }
+}

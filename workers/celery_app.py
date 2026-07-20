@@ -6,7 +6,12 @@ celery_app = Celery(
     "viralcut",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["workers.tasks.health", "workers.tasks.proxy", "workers.tasks.metadata_extraction"],
+    include=[
+        "workers.tasks.health",
+        "workers.tasks.proxy",
+        "workers.tasks.metadata_extraction",
+        "workers.tasks.edit_plan",
+    ],
 )
 
 celery_app.conf.update(
