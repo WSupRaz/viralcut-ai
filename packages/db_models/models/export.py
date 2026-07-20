@@ -5,14 +5,14 @@ from sqlalchemy import ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import AspectRatio, ExportQuality
-from app.models.pg_enums import aspect_ratio_enum, export_quality_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import AspectRatio, ExportQuality
+from db_models.models.pg_enums import aspect_ratio_enum, export_quality_enum
 
 if TYPE_CHECKING:
-    from app.models.job import Job
-    from app.models.project import Project
-    from app.models.timeline import Timeline
+    from db_models.models.job import Job
+    from db_models.models.project import Project
+    from db_models.models.timeline import Timeline
 
 
 class Export(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -3,13 +3,13 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.source_video import SourceVideo
 from app.schemas.source_video import SourceVideoPresignRequest, SourceVideoPresignResponse
 from app.services.storage import (
     ALLOWED_VIDEO_CONTENT_TYPES,
     build_raw_video_key,
     generate_presigned_upload_url,
 )
+from db_models.models.source_video import SourceVideo
 
 
 class UnsupportedVideoTypeError(Exception):

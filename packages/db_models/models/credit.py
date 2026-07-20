@@ -5,12 +5,12 @@ from sqlalchemy import ForeignKey, Index, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import CreditReason
-from app.models.pg_enums import credit_reason_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import CreditReason
+from db_models.models.pg_enums import credit_reason_enum
 
 if TYPE_CHECKING:
-    from app.models.user import User
+    from db_models.models.user import User
 
 
 class Credit(UUIDPrimaryKeyMixin, TimestampMixin, Base):

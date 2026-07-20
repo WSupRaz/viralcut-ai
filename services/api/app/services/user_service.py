@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
-from app.models.user import User
+from db_models.models.user import User
 
 
 class EmailAlreadyRegisteredError(Exception):

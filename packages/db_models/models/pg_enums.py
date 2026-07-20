@@ -8,7 +8,7 @@ aspect_ratio) is used as a column on more than one table.
 
 from sqlalchemy import Enum as SqlEnum
 
-from app.models.enums import (
+from db_models.models.enums import (
     AspectRatio,
     AssetSource,
     AssetType,

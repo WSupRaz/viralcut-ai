@@ -6,13 +6,13 @@ from sqlalchemy import ForeignKey, Index, Integer, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import SourceVideoStatus
-from app.models.pg_enums import source_video_status_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import SourceVideoStatus
+from db_models.models.pg_enums import source_video_status_enum
 
 if TYPE_CHECKING:
-    from app.models.project import Project
-    from app.models.video_metadata import VideoMetadata
+    from db_models.models.project import Project
+    from db_models.models.video_metadata import VideoMetadata
 
 
 class SourceVideo(UUIDPrimaryKeyMixin, TimestampMixin, Base):

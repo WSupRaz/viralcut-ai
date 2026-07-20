@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import AspectRatio, ProjectStatus
+from db_models.models.enums import AspectRatio, ProjectStatus
 
 
 class ProjectCreate(BaseModel):

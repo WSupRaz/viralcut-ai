@@ -5,12 +5,12 @@ from sqlalchemy import ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
-    from app.models.edit_plan import EditPlan
-    from app.models.export import Export
-    from app.models.project import Project
+    from db_models.models.edit_plan import EditPlan
+    from db_models.models.export import Export
+    from db_models.models.project import Project
 
 
 class Timeline(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_owned_project
-from app.models.project import Project
 from app.schemas.source_video import (
     SourceVideoPresignRequest,
     SourceVideoPresignResponse,
@@ -13,6 +12,7 @@ from app.services.source_video_service import (
     list_source_videos,
     presign_source_video_upload,
 )
+from db_models.models.project import Project
 
 router = APIRouter(prefix="/projects/{project_id}/source-videos", tags=["source-videos"])
 

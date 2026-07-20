@@ -4,11 +4,11 @@ from sqlalchemy import Boolean, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
-    from app.models.edit_plan import EditPlan
-    from app.models.project import Project
+    from db_models.models.edit_plan import EditPlan
+    from db_models.models.project import Project
 
 
 class Style(UUIDPrimaryKeyMixin, TimestampMixin, Base):

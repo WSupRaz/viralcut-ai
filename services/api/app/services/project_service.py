@@ -3,8 +3,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.project import Project
 from app.schemas.project import ProjectCreate, ProjectUpdate
+from db_models.models.project import Project
 
 
 async def create_project(db: AsyncSession, *, user_id: uuid.UUID, data: ProjectCreate) -> Project:

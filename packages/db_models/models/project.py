@@ -5,18 +5,18 @@ from sqlalchemy import ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import AspectRatio, ProjectStatus
-from app.models.pg_enums import aspect_ratio_enum, project_status_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import AspectRatio, ProjectStatus
+from db_models.models.pg_enums import aspect_ratio_enum, project_status_enum
 
 if TYPE_CHECKING:
-    from app.models.edit_plan import EditPlan
-    from app.models.export import Export
-    from app.models.job import Job
-    from app.models.source_video import SourceVideo
-    from app.models.style import Style
-    from app.models.timeline import Timeline
-    from app.models.user import User
+    from db_models.models.edit_plan import EditPlan
+    from db_models.models.export import Export
+    from db_models.models.job import Job
+    from db_models.models.source_video import SourceVideo
+    from db_models.models.style import Style
+    from db_models.models.timeline import Timeline
+    from db_models.models.user import User
 
 
 class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):

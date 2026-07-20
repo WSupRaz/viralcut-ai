@@ -5,14 +5,14 @@ from sqlalchemy import ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import EditPlanStatus
-from app.models.pg_enums import edit_plan_status_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import EditPlanStatus
+from db_models.models.pg_enums import edit_plan_status_enum
 
 if TYPE_CHECKING:
-    from app.models.project import Project
-    from app.models.style import Style
-    from app.models.timeline import Timeline
+    from db_models.models.project import Project
+    from db_models.models.style import Style
+    from db_models.models.timeline import Timeline
 
 
 class EditPlan(UUIDPrimaryKeyMixin, TimestampMixin, Base):

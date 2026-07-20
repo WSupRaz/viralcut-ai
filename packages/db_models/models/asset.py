@@ -4,12 +4,12 @@ from sqlalchemy import ARRAY, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import AssetSource, AssetType
-from app.models.pg_enums import asset_source_enum, asset_type_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import AssetSource, AssetType
+from db_models.models.pg_enums import asset_source_enum, asset_type_enum
 
 if TYPE_CHECKING:
-    from app.models.template import Template
+    from db_models.models.template import Template
 
 
 class Asset(UUIDPrimaryKeyMixin, TimestampMixin, Base):

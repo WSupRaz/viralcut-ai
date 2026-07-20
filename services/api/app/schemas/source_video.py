@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import SourceVideoStatus
+from db_models.models.enums import SourceVideoStatus
 
 
 class SourceVideoPresignRequest(BaseModel):

@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.enums import PlanTier
+from db_models.models.enums import PlanTier
 
 
 class UserCreate(BaseModel):

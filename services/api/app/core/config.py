@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     r2_secret_access_key: str = ""
     r2_bucket_name: str = "viralcut-assets"
     r2_public_base_url: str = ""
+    # Overrides the computed R2 endpoint; used in dev to point at MinIO instead.
+    r2_endpoint_url: str | None = None
 
     allowed_origins: list[str] = ["http://localhost:3000"]
 

@@ -6,12 +6,12 @@ from sqlalchemy import DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import PlanTier
-from app.models.pg_enums import plan_tier_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import PlanTier
+from db_models.models.pg_enums import plan_tier_enum
 
 if TYPE_CHECKING:
-    from app.models.user import User
+    from db_models.models.user import User
 
 
 class BillingAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):

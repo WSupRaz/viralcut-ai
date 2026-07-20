@@ -4,14 +4,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import PlanTier
-from app.models.pg_enums import plan_tier_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import PlanTier
+from db_models.models.pg_enums import plan_tier_enum
 
 if TYPE_CHECKING:
-    from app.models.billing import BillingAccount
-    from app.models.credit import Credit
-    from app.models.project import Project
+    from db_models.models.billing import BillingAccount
+    from db_models.models.credit import Credit
+    from db_models.models.project import Project
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):

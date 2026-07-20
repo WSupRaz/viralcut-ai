@@ -5,10 +5,10 @@ from sqlalchemy import ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
-    from app.models.asset import Asset
+    from db_models.models.asset import Asset
 
 
 class Template(UUIDPrimaryKeyMixin, TimestampMixin, Base):

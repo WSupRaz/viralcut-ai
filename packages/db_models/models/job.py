@@ -5,13 +5,13 @@ from sqlalchemy import ForeignKey, Index, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import JobStatus, JobType
-from app.models.pg_enums import job_status_enum, job_type_enum
+from db_models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from db_models.models.enums import JobStatus, JobType
+from db_models.models.pg_enums import job_status_enum, job_type_enum
 
 if TYPE_CHECKING:
-    from app.models.export import Export
-    from app.models.project import Project
+    from db_models.models.export import Export
+    from db_models.models.project import Project
 
 
 class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
