@@ -11,6 +11,7 @@ celery_app = Celery(
         "workers.tasks.proxy",
         "workers.tasks.metadata_extraction",
         "workers.tasks.edit_plan",
+        "workers.tasks.render_dispatch",
     ],
 )
 
