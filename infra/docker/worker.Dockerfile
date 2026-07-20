@@ -17,6 +17,5 @@ COPY workers/requirements.txt ./requirements.txt
 RUN pip install -r requirements.txt
 
 COPY workers ./workers
-COPY packages/edit-plan-schema ./packages/edit-plan-schema
 
-CMD ["celery", "-A", "workers.celery_app", "worker", "--loglevel=info"]
+CMD ["celery", "-A", "workers.celery_app:celery_app", "worker", "--loglevel=info"]

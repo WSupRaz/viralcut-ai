@@ -15,7 +15,6 @@ COPY services/api/requirements.txt ./requirements.txt
 RUN pip install -r requirements.txt
 
 COPY services/api ./services/api
-COPY packages/edit-plan-schema ./packages/edit-plan-schema
 
 WORKDIR /app/services/api
 
