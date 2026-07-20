@@ -1,16 +1,28 @@
 import React from "react";
 import { Composition } from "remotion";
-import { CaptionsComposition, captionsPropsSchema } from "./compositions/captions/CaptionsComposition";
+import { z } from "zod";
+import { EditComposition, editCompositionPropsSchema } from "./compositions/EditComposition";
+
+// calculateMetadata below derives the actual composition duration/fps/
+// dimensions from these, rather than hardcoding them -- render.ts fills
+// them in from the real input video's probed metadata.
+const rootPropsSchema = editCompositionPropsSchema.extend({
+  videoDurationInSeconds: z.number(),
+  videoWidth: z.number(),
+  videoHeight: z.number(),
+  fps: z.number(),
+});
 
 export const RemotionRoot: React.FC = () => {
   return (
     <Composition
-      id="Captions"
-      component={CaptionsComposition}
-      schema={captionsPropsSchema}
+      id="Edit"
+      component={EditComposition}
+      schema={rootPropsSchema}
       defaultProps={{
         videoSrc: "",
         subtitles: [],
+        zooms: [],
         videoDurationInSeconds: 1,
         videoWidth: 1080,
         videoHeight: 1920,

@@ -9,6 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 interface Args {
   input: string;
   subtitles: string;
+  zooms?: string;
   output: string;
 }
 
@@ -20,7 +21,16 @@ function parseArgs(): Args {
     if (!found) throw new Error(`Missing required arg --${name}`);
     return found.slice(prefix.length);
   };
-  return { input: get("input"), subtitles: get("subtitles"), output: get("output") };
+  const getOptional = (name: string): string | undefined => {
+    const prefix = `--${name}=`;
+    return args.find((a) => a.startsWith(prefix))?.slice(prefix.length);
+  };
+  return {
+    input: get("input"),
+    subtitles: get("subtitles"),
+    zooms: getOptional("zooms"),
+    output: get("output"),
+  };
 }
 
 async function main() {
@@ -28,6 +38,7 @@ async function main() {
   const input = path.resolve(args.input);
   const output = path.resolve(args.output);
   const subtitles = JSON.parse(fs.readFileSync(path.resolve(args.subtitles), "utf-8"));
+  const zooms = args.zooms ? JSON.parse(fs.readFileSync(path.resolve(args.zooms), "utf-8")) : [];
 
   console.log(`Probing ${input}...`);
   const videoMetadata = await getVideoMetadata(input);
@@ -45,6 +56,7 @@ async function main() {
   const inputProps = {
     videoSrc: path.basename(input),
     subtitles,
+    zooms,
     videoDurationInSeconds: videoMetadata.durationInSeconds,
     videoWidth: videoMetadata.width,
     videoHeight: videoMetadata.height,
@@ -54,7 +66,7 @@ async function main() {
   console.log("Selecting composition...");
   const composition = await selectComposition({
     serveUrl: bundleLocation,
-    id: "Captions",
+    id: "Edit",
     inputProps,
   });
 

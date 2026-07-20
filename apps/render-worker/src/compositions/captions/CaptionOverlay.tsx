@@ -1,22 +1,13 @@
 import React from "react";
-import { AbsoluteFill, OffthreadVideo, Sequence, staticFile, useVideoConfig } from "remotion";
+import { AbsoluteFill, Sequence, useVideoConfig } from "remotion";
 import { z } from "zod";
 import { SubtitleSchema } from "@viralcut/edit-plan-schema";
 
-export const captionsPropsSchema = z.object({
-  // Filename only, relative to the bundle's publicDir -- resolved via
-  // staticFile() below. Remotion's asset pipeline only serves http(s) URLs,
-  // not raw local file paths, so render.ts sets publicDir to the input
-  // video's directory and passes just the basename here.
-  videoSrc: z.string(),
+export const captionOverlayPropsSchema = z.object({
   subtitles: z.array(SubtitleSchema),
-  videoDurationInSeconds: z.number(),
-  videoWidth: z.number(),
-  videoHeight: z.number(),
-  fps: z.number(),
 });
 
-export type CaptionsProps = z.infer<typeof captionsPropsSchema>;
+export type CaptionOverlayProps = z.infer<typeof captionOverlayPropsSchema>;
 
 // Hormozi style (packages/style-presets/hormozi.json): bold, animated
 // captions on every spoken word, 1-3 key words per sentence highlighted in
@@ -24,12 +15,14 @@ export type CaptionsProps = z.infer<typeof captionsPropsSchema>;
 const EMPHASIS_COLOR = "#FFE600";
 const BASE_COLOR = "#FFFFFF";
 
-export const CaptionsComposition: React.FC<CaptionsProps> = ({ videoSrc, subtitles }) => {
+// Fixed-size overlay only -- deliberately has no video layer of its own so
+// it can sit on top of ZoomableVideo (compositions/zooms/ZoomableVideo.tsx)
+// without the zoom's scale transform blowing up the caption text too.
+export const CaptionOverlay: React.FC<CaptionOverlayProps> = ({ subtitles }) => {
   const { fps } = useVideoConfig();
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "black" }}>
-      <OffthreadVideo src={staticFile(videoSrc)} />
+    <>
       {subtitles.map((sub, i) => {
         const fromFrame = Math.round(sub.start * fps);
         const toFrame = Math.round(sub.end * fps);
@@ -59,6 +52,6 @@ export const CaptionsComposition: React.FC<CaptionsProps> = ({ videoSrc, subtitl
           </Sequence>
         );
       })}
-    </AbsoluteFill>
+    </>
   );
 };
