@@ -9,3 +9,5 @@ boto3==1.35.36
 openai==1.54.4
 # openai==1.54.4 calls httpx.Client(proxies=...), removed in httpx 0.28 -- pin below that.
 httpx==0.27.2
+
+scenedetect[opencv]==0.6.4
