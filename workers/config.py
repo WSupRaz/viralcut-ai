@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # Overrides the computed R2 endpoint; used in dev to point at MinIO instead.
     r2_endpoint_url: str | None = None
 
+    openai_api_key: str = ""
+    # Optional fallback ASR provider, used only if the OpenAI call fails.
+    groq_api_key: str = ""
+
     @property
     def sync_database_url(self) -> str:
         """DATABASE_URL is asyncpg-flavored for the FastAPI service; workers
