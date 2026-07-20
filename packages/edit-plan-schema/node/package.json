@@ -1,0 +1,19 @@
+{
+  "name": "@viralcut/edit-plan-schema",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Zod schema for the edit-plan JSON contract (ADR-0005). Structural validation only -- the Python side owns clamping.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

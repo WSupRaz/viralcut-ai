@@ -81,6 +81,7 @@ services:
     volumes:
       - ../services/api:/app/services/api
       - ../packages/db_models:/app/packages/db_models
+      - ../packages/edit-plan-schema/python/edit_plan_schema:/app/packages/edit_plan_schema
 
   worker:
     build:
@@ -99,6 +100,7 @@ services:
     volumes:
       - ../workers:/app/workers
       - ../packages/db_models:/app/packages/db_models
+      - ../packages/edit-plan-schema/python/edit_plan_schema:/app/packages/edit_plan_schema
 
   render-worker:
     build:

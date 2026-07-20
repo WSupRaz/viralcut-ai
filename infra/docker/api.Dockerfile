@@ -6,9 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# db_models is a shared package (SQLAlchemy models used by both this API and
-# the Celery workers) -- put it on PYTHONPATH so `import db_models` resolves
-# regardless of WORKDIR.
+# db_models and edit_plan_schema are shared packages (used by both this API
+# and the Celery workers) -- put them on PYTHONPATH so `import db_models` /
+# `import edit_plan_schema` resolve regardless of WORKDIR.
 ENV PYTHONPATH=/app/packages
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,6 +20,7 @@ COPY services/api/requirements.txt ./requirements.txt
 RUN pip install -r requirements.txt
 
 COPY packages/db_models ./packages/db_models
+COPY packages/edit-plan-schema/python/edit_plan_schema ./packages/edit_plan_schema
 COPY services/api ./services/api
 
 WORKDIR /app/services/api

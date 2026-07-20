@@ -6,9 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# db_models is a shared package (SQLAlchemy models used by both this worker
-# and the FastAPI service) -- put it on PYTHONPATH so `import db_models`
-# resolves regardless of WORKDIR.
+# db_models and edit_plan_schema are shared packages (used by both this
+# worker and the FastAPI service) -- put them on PYTHONPATH so
+# `import db_models` / `import edit_plan_schema` resolve regardless of WORKDIR.
 ENV PYTHONPATH=/app/packages
 
 # ffmpeg + build deps for PySceneDetect/av bindings (ADR-0003: ffmpeg + PySceneDetect only)
@@ -22,6 +22,7 @@ COPY workers/requirements.txt ./requirements.txt
 RUN pip install -r requirements.txt
 
 COPY packages/db_models ./packages/db_models
+COPY packages/edit-plan-schema/python/edit_plan_schema ./packages/edit_plan_schema
 COPY workers ./workers
 
 CMD ["celery", "-A", "workers.celery_app:celery_app", "worker", "--loglevel=info"]
