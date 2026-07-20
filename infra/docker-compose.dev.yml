@@ -1,0 +1,93 @@
+name: viralcut-ai
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: viralcut
+      POSTGRES_PASSWORD: viralcut_dev
+      POSTGRES_DB: viralcut
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U viralcut"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../services/api:/app/services/api
+      - ../packages/edit-plan-schema:/app/packages/edit-plan-schema
+
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/docker/worker.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../workers:/app/workers
+      - ../packages/edit-plan-schema:/app/packages/edit-plan-schema
+
+  render-worker:
+    build:
+      context: ..
+      dockerfile: infra/docker/render-worker.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+
+  web:
+    image: node:20-bookworm-slim
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    env_file:
+      - ../.env
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../apps/web:/app
+
+volumes:
+  postgres_data:
