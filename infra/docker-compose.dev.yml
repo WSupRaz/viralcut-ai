@@ -102,18 +102,18 @@ services:
       - ../packages/db_models:/app/packages/db_models
       - ../packages/edit-plan-schema/python/edit_plan_schema:/app/packages/edit_plan_schema
 
+  # CLI tool (Remotion render), not a persistent service -- run per-job via
+  # `docker compose run --rm render-worker --input=... --subtitles=... --output=...`,
+  # never `docker compose up render-worker` (there's nothing to keep running).
   render-worker:
     build:
       context: ..
       dockerfile: infra/docker/render-worker.Dockerfile
-    restart: unless-stopped
+    profiles: ["tools"]
     env_file:
       - ../.env
-    depends_on:
-      redis:
-        condition: service_healthy
-    ports:
-      - "3001:3001"
+    volumes:
+      - ../apps/render-worker/src:/app/apps/render-worker/src
 
   web:
     image: node:20-bookworm-slim

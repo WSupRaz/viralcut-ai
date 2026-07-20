@@ -17,11 +17,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY apps/render-worker/package.json apps/render-worker/package-lock.json ./
-RUN npm ci --omit=dev
+# @viralcut/edit-plan-schema is a local `file:../../packages/edit-plan-schema/node`
+# dependency -- must exist at that relative path before `npm install` can resolve it.
+COPY packages/edit-plan-schema/node ./packages/edit-plan-schema/node
+COPY apps/render-worker ./apps/render-worker
 
-COPY apps/render-worker ./
+WORKDIR /app/apps/render-worker
+RUN npm install
 
-EXPOSE 3001
-
-CMD ["node", "dist/render.js"]
+# Runs via tsx (a runtime dependency here, not just a dev tool) rather than a
+# separate tsc-compile step -- this is the exact path verified locally, and
+# avoids a second, untested code path where compiled dist/render.js would
+# need to resolve its Remotion entry point by a different file extension
+# than the source does.
+ENTRYPOINT ["npx", "tsx", "src/render.ts"]
