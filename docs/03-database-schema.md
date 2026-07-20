@@ -47,7 +47,7 @@ One row per `source_video`. This is the *only* input Claude ever receives
 | transcript | jsonb | word-level timestamps + speaker labels |
 | scene_changes | jsonb | array of timestamps from PySceneDetect |
 | silences | jsonb | array of {start, end} |
-| speakers | jsonb | diarization segments |
+| speakers | jsonb | diarization segments — single full-duration segment in Phase 1, see ADR-0004 amendment |
 | provider | text | which ASR provider produced this (ADR-0001) |
 
 ## edit_plans
