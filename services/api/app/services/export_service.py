@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.celery_client import celery_client
+from app.core.celery_client import send_task
 from app.schemas.export import ExportRead
 from app.services.job_service import create_job
 from app.services.storage import generate_presigned_get_url
@@ -73,7 +73,7 @@ async def create_export(
     await db.commit()
     await db.refresh(export)
 
-    celery_client.send_task(
+    send_task(
         "workers.tasks.render_dispatch.render_export", args=[str(export.id), str(job.id)]
     )
     return export

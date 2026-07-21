@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.celery_client import celery_client
+from app.core.celery_client import send_task
 from app.services.job_service import create_job
 from db_models.models.edit_plan import EditPlan
 from db_models.models.enums import JobType, SourceVideoStatus
@@ -35,7 +35,7 @@ async def trigger_edit_plan_generation(db: AsyncSession, *, project_id: uuid.UUI
         raise SourceVideosNotReadyError(len(not_ready))
 
     job = await create_job(db, project_id=project_id, job_type=JobType.EDIT_PLAN)
-    celery_client.send_task(
+    send_task(
         "workers.tasks.edit_plan.generate_edit_plan", args=[str(project_id), str(job.id)]
     )
     return job

@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.celery_client import celery_client
+from app.core.celery_client import send_task
 from app.schemas.source_video import SourceVideoPresignRequest, SourceVideoPresignResponse
 from app.services.job_service import create_job
 from app.services.storage import (
@@ -56,7 +56,7 @@ async def confirm_source_video_upload(
     plan generation stays an explicit user action (POST .../edit-plan) since
     it depends on style/instructions the user may still be setting."""
     job = await create_job(db, project_id=source_video.project_id, job_type=JobType.PROXY)
-    celery_client.send_task(
+    send_task(
         "workers.tasks.proxy.generate_proxy", args=[str(source_video.id), str(job.id)]
     )
     return job

@@ -25,4 +25,6 @@ COPY packages/db_models ./packages/db_models
 COPY packages/edit-plan-schema/python/edit_plan_schema ./packages/edit_plan_schema
 COPY workers ./workers
 
-CMD ["celery", "-A", "workers.celery_app:celery_app", "worker", "--loglevel=info"]
+EXPOSE 8000
+
+CMD ["python", "-m", "workers.entrypoint"]

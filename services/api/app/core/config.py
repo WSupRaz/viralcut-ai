@@ -30,6 +30,14 @@ class Settings(BaseSettings):
 
     allowed_origins: list[str] = ["http://localhost:3000"]
 
+    # Best-effort "wake up" ping fired at the worker's public URL whenever a
+    # task is enqueued -- needed only on free-tier PaaS hosts (e.g. Render)
+    # that spin a service down after idle HTTP traffic; the Celery worker's
+    # actual work (consuming Redis) isn't something those platforms see as
+    # "activity". Leave unset where the worker doesn't sleep (local dev, or
+    # any always-on host).
+    worker_wake_url: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
