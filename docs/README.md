@@ -6,7 +6,8 @@ Read in this order:
 2. [02-folder-structure.md](02-folder-structure.md) — monorepo layout
 3. [03-database-schema.md](03-database-schema.md) — Postgres schema
 4. [04-roadmap.md](04-roadmap.md) — phases, sequential task list, costs, risks
-5. [adr/](adr/) — decisions that deviate from the original spec, with reasoning
+5. [05-deployment.md](05-deployment.md) — Railway + Vercel + Cloudflare R2 deployment runbook
+6. [adr/](adr/) — decisions that deviate from the original spec, with reasoning
 
 ## Deviations from the original spec (see ADRs for full reasoning)
 
