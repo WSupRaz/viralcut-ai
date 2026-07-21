@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     r2_public_base_url: str = ""
     # Overrides the computed R2 endpoint; used in dev to point at MinIO instead.
     r2_endpoint_url: str | None = None
+    # Overrides r2_endpoint_url specifically for presigned URLs handed to the
+    # browser. In dev, R2_ENDPOINT_URL is the Docker-internal MinIO hostname
+    # (http://minio:9000), unreachable from a browser on the host -- the
+    # presigned URL's host must be one the browser can actually resolve.
+    # Doesn't apply to real R2 in prod (one public endpoint for everyone),
+    # so this only needs to be set for local dev.
+    r2_public_endpoint_url: str | None = None
 
     allowed_origins: list[str] = ["http://localhost:3000"]
 

@@ -17,7 +17,14 @@ ALLOWED_VIDEO_CONTENT_TYPES = {
 
 @lru_cache
 def get_r2_client():
-    endpoint_url = settings.r2_endpoint_url or f"https://{settings.r2_account_id}.r2.cloudflarestorage.com"
+    # This client only ever generates presigned URLs (no direct transfers),
+    # so it must use whatever endpoint the eventual requester (the browser)
+    # can reach -- r2_public_endpoint_url when set, see config.py.
+    endpoint_url = (
+        settings.r2_public_endpoint_url
+        or settings.r2_endpoint_url
+        or f"https://{settings.r2_account_id}.r2.cloudflarestorage.com"
+    )
     return boto3.client(
         "s3",
         endpoint_url=endpoint_url,
