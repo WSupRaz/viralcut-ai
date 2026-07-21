@@ -25,6 +25,10 @@ COPY apps/render-worker ./apps/render-worker
 WORKDIR /app/apps/render-worker
 RUN npm install
 
+# Bake the headless Chromium download into the image layer (cached) instead
+# of downloading it on the first production render.
+RUN npx tsx scripts/ensure-browser.mjs
+
 EXPOSE 3001
 
 # Runs via tsx (a runtime dependency here, not just a dev tool) rather than a
