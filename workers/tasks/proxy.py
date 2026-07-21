@@ -4,7 +4,7 @@ import uuid
 from decimal import Decimal
 from pathlib import Path
 
-from db_models.models.enums import JobStatus, SourceVideoStatus
+from db_models.models.enums import JobStatus, JobType, SourceVideoStatus
 from db_models.models.job import Job
 from db_models.models.source_video import SourceVideo
 
@@ -103,10 +103,23 @@ def generate_proxy(self, source_video_id: str, job_id: str) -> dict:
         source_video.status = SourceVideoStatus.PROXY_READY
         job.status = JobStatus.SUCCEEDED
         job.progress_pct = 100
+
+        # Chain into metadata extraction automatically -- it needs no user
+        # input, unlike edit-plan generation (explicit user action, since it
+        # depends on style/instructions the user may still be setting).
+        next_job = Job(project_id=source_video.project_id, type=JobType.METADATA_EXTRACTION)
+        session.add(next_job)
         session.commit()
+        next_job_id = str(next_job.id)
+
+    celery_app.send_task(
+        "workers.tasks.metadata_extraction.extract_metadata",
+        args=[source_video_id, next_job_id],
+    )
 
     return {
         "source_video_id": source_video_id,
         "r2_key_proxy": proxy_key,
         "duration_seconds": str(duration),
+        "metadata_job_id": next_job_id,
     }

@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     # Optional fallback edit-plan provider, used only if the Claude call fails.
     openrouter_api_key: str = ""
 
+    render_worker_url: str = "http://render-worker:3001"
+
     @property
     def sync_database_url(self) -> str:
         """DATABASE_URL is asyncpg-flavored for the FastAPI service; workers

@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "render": "tsx src/render.ts"
+    "render": "tsx src/render.ts",
+    "start": "tsx src/server.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.687.0",
     "@remotion/bundler": "4.0.495",
     "@remotion/renderer": "4.0.495",
     "react": "18.3.1",

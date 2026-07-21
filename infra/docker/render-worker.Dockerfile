@@ -25,9 +25,16 @@ COPY apps/render-worker ./apps/render-worker
 WORKDIR /app/apps/render-worker
 RUN npm install
 
+EXPOSE 3001
+
 # Runs via tsx (a runtime dependency here, not just a dev tool) rather than a
 # separate tsc-compile step -- this is the exact path verified locally, and
-# avoids a second, untested code path where compiled dist/render.js would
+# avoids a second, untested code path where compiled dist/server.js would
 # need to resolve its Remotion entry point by a different file extension
 # than the source does.
-ENTRYPOINT ["npx", "tsx", "src/render.ts"]
+#
+# Persistent HTTP service (POST /render), invoked by the Python render
+# orchestration task -- not a CLI tool anymore now that there's a real
+# cross-service caller (task 13). `render.ts` still exists as a standalone
+# CLI entrypoint for local debugging (`npm run render -- --input=... ...`).
+CMD ["npx", "tsx", "src/server.ts"]

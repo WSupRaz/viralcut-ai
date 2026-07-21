@@ -97,23 +97,35 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      render-worker:
+        condition: service_healthy
+    environment:
+      RENDER_WORKER_URL: http://render-worker:3001
     volumes:
       - ../workers:/app/workers
       - ../packages/db_models:/app/packages/db_models
       - ../packages/edit-plan-schema/python/edit_plan_schema:/app/packages/edit_plan_schema
 
-  # CLI tool (Remotion render), not a persistent service -- run per-job via
-  # `docker compose run --rm render-worker --input=... --subtitles=... --output=...`,
-  # never `docker compose up render-worker` (there's nothing to keep running).
   render-worker:
     build:
       context: ..
       dockerfile: infra/docker/render-worker.Dockerfile
-    profiles: ["tools"]
+    restart: unless-stopped
     env_file:
       - ../.env
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
     volumes:
       - ../apps/render-worker/src:/app/apps/render-worker/src
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   web:
     image: node:20-bookworm-slim
