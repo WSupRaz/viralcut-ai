@@ -96,8 +96,11 @@ credentials/host, just the scheme prefix changed. Workers need the sync
 `postgresql+psycopg://...` variant (see `workers/config.py`'s
 `sync_database_url` property, which derives it automatically from an
 asyncpg-style URL -- so set `DATABASE_URL` everywhere as
-`postgresql+asyncpg://...` and workers convert it themselves). Neon's
-connection string usually includes `?sslmode=require` -- keep that suffix.
+`postgresql+asyncpg://...` and workers convert it themselves). Neon's connection string usually includes `?sslmode=require&channel_binding=require`
+-- drop both. `asyncpg` doesn't understand either one; use `?ssl=require`
+instead (SQLAlchemy's asyncpg dialect translates that into the `sslmode`
+kwarg asyncpg actually validates against -- `sslmode=require` passed
+straight through, or `channel_binding`, both fail outright).
 
 ## Step 4 -- Upstash (Redis)
 
@@ -138,7 +141,7 @@ settings: `/healthz` for `api` and `render-worker`, `/` for `worker`
 Copy from `.env.example`, with these production-specific changes:
 
 ```
-DATABASE_URL=postgresql+asyncpg://<neon-connection-string, scheme swapped>
+DATABASE_URL=postgresql+asyncpg://<user>:<password>@<neon-host>/<db>?ssl=require
 CELERY_BROKER_URL=<upstash-rediss-url>/0
 CELERY_RESULT_BACKEND=<upstash-rediss-url>/1
 
@@ -174,12 +177,23 @@ defaults.
 
 ## Step 6 -- Run migrations
 
-One-off, after the `api` service's first successful deploy. Render's
-dashboard has a **Shell** tab per service -- open it on `api` and run:
+Render's **Shell** tab (for running one-off commands against a live
+service) is a paid-plan-only feature -- not available on the Free instance
+type. Run migrations from your own machine against Neon instead, using the
+same `api` Docker image you already build for local dev:
 
 ```bash
-cd services/api && alembic upgrade head
+docker compose -f infra/docker-compose.dev.yml build api
+docker compose -f infra/docker-compose.dev.yml run --rm \
+  -e DATABASE_URL="postgresql+asyncpg://<user>:<password>@<neon-host>/<db>?ssl=require" \
+  api alembic upgrade head
 ```
+
+(No `cd services/api` needed -- `api.Dockerfile`'s last `WORKDIR` is already
+`/app/services/api`.) This spins up the local Postgres/Redis/MinIO sidecars
+too since they're declared as `depends_on` in the compose file, but the
+migration itself only touches the `DATABASE_URL` you passed in -- Neon, not
+the local sidecar Postgres.
 
 Re-run this any time a new migration is added (same manual, deliberate step
 used throughout local development -- no auto-migrate-on-boot, to avoid
