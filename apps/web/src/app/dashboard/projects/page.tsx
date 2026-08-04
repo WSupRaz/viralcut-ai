@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ const STATUS_VARIANT: Record<ProjectStatus, "secondary" | "default" | "destructi
 };
 
 export default function ProjectsPage() {
+  const router = useRouter();
   const { data: projects, isLoading } = useProjects();
   const { data: styles } = useStyles();
   const createProject = useCreateProject();
@@ -45,19 +47,19 @@ export default function ProjectsPage() {
   const [instructions, setInstructions] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const styleItems = styles?.map((style) => ({ value: style.id, label: style.name })) ?? [];
+
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     try {
-      await createProject.mutateAsync({
+      const project = await createProject.mutateAsync({
         title,
         target_aspect_ratio: "9:16",
         style_id: styleId || null,
         instructions: instructions || null,
       });
-      setTitle("");
-      setStyleId("");
-      setInstructions("");
+      router.push(`/dashboard/projects/${project.id}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create project");
     }
@@ -70,6 +72,7 @@ export default function ProjectsPage() {
           <CardTitle>New project</CardTitle>
           <CardDescription>
             Pick a style and describe what you want -- vertical (9:16) only for now.
+            You&apos;ll upload footage on the next screen.
           </CardDescription>
         </CardHeader>
         <form onSubmit={onCreate}>
@@ -80,7 +83,11 @@ export default function ProjectsPage() {
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="style">Style</Label>
-              <Select value={styleId} onValueChange={(value) => setStyleId(value ?? "")}>
+              <Select
+                items={styleItems}
+                value={styleId}
+                onValueChange={(value) => setStyleId(value ?? "")}
+              >
                 <SelectTrigger id="style" className="w-full">
                   <SelectValue placeholder="Choose a style" />
                 </SelectTrigger>
