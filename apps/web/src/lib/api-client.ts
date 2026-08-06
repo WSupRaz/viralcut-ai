@@ -99,6 +99,12 @@ export const api = {
   listSourceVideos: (token: string, projectId: string) =>
     request<SourceVideo[]>(`/api/v1/projects/${projectId}/source-videos`, { token }),
 
+  deleteSourceVideo: (token: string, projectId: string, sourceVideoId: string) =>
+    request<void>(`/api/v1/projects/${projectId}/source-videos/${sourceVideoId}`, {
+      method: "DELETE",
+      token,
+    }),
+
   listJobs: (token: string, projectId: string) =>
     request<Job[]>(`/api/v1/projects/${projectId}/jobs`, { token }),
 

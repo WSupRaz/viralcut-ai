@@ -2,12 +2,13 @@
 
 import { useParams } from "next/navigation";
 import { useRef, useState } from "react";
+import { Trash2Icon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { ApiError } from "@/lib/api-client";
-import { useProject, useSourceVideos, useUploadSourceVideo } from "@/lib/query/hooks";
+import { useDeleteSourceVideo, useProject, useSourceVideos, useUploadSourceVideo } from "@/lib/query/hooks";
 import type { SourceVideoStatus } from "@/types/api";
 
 const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/x-m4v"];
@@ -31,10 +32,24 @@ export default function ProjectDetailPage() {
   const { data: project } = useProject(id);
   const { data: sourceVideos } = useSourceVideos(id);
   const uploadVideo = useUploadSourceVideo(id);
+  const deleteVideo = useDeleteSourceVideo(id);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function onDelete(sourceVideoId: string) {
+    if (!window.confirm("Remove this clip? This can't be undone.")) return;
+    setDeletingId(sourceVideoId);
+    try {
+      await deleteVideo.mutateAsync(sourceVideoId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not remove clip");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   async function onFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -111,7 +126,19 @@ export default function ProjectDetailPage() {
                       Clip {video.order_index + 1}
                       {video.duration_seconds && ` -- ${Math.round(Number(video.duration_seconds))}s`}
                     </span>
-                    <Badge variant={STATUS_VARIANT[video.status]}>{STATUS_LABEL[video.status]}</Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={STATUS_VARIANT[video.status]}>{STATUS_LABEL[video.status]}</Badge>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Remove clip"
+                        disabled={deletingId === video.id}
+                        onClick={() => onDelete(video.id)}
+                      >
+                        <Trash2Icon className="text-muted-foreground" />
+                      </Button>
+                    </div>
                   </li>
                 ))}
               </ul>

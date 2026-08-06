@@ -9,6 +9,7 @@ from app.services.job_service import create_job
 from app.services.storage import (
     ALLOWED_VIDEO_CONTENT_TYPES,
     build_raw_video_key,
+    delete_object,
     generate_presigned_upload_url,
 )
 from db_models.models.enums import JobType
@@ -80,3 +81,18 @@ async def get_source_video_for_project(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def delete_source_video(db: AsyncSession, *, source_video: SourceVideo) -> None:
+    # Best-effort: a presigned-upload row can exist with no object behind it
+    # at all (the browser PUT may never have completed). The DB row is the
+    # part the user is actually asking to remove, so a storage-side hiccup
+    # shouldn't block that.
+    for key in filter(None, [source_video.r2_key_raw, source_video.r2_key_proxy]):
+        try:
+            delete_object(key)
+        except Exception:
+            pass
+
+    await db.delete(source_video)
+    await db.commit()

@@ -61,6 +61,17 @@ export function useSourceVideos(projectId: string) {
   });
 }
 
+export function useDeleteSourceVideo(projectId: string) {
+  const token = useToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sourceVideoId: string) => api.deleteSourceVideo(token, projectId, sourceVideoId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects", projectId, "source-videos"] });
+    },
+  });
+}
+
 export function useUploadSourceVideo(projectId: string) {
   const token = useToken();
   const queryClient = useQueryClient();

@@ -13,6 +13,7 @@ from app.schemas.source_video import (
 from app.services.source_video_service import (
     UnsupportedVideoTypeError,
     confirm_source_video_upload,
+    delete_source_video,
     get_source_video_for_project,
     list_source_videos,
     presign_source_video_upload,
@@ -65,3 +66,17 @@ async def confirm_upload(
     if source_video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source video not found")
     return await confirm_source_video_upload(db, source_video=source_video)
+
+
+@router.delete("/{source_video_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete(
+    source_video_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    project: Project = Depends(get_owned_project),
+) -> None:
+    source_video = await get_source_video_for_project(
+        db, project_id=project.id, source_video_id=source_video_id
+    )
+    if source_video is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source video not found")
+    await delete_source_video(db, source_video=source_video)
