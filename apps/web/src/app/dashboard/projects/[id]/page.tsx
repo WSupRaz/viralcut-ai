@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { DownloadIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { DownloadIcon, RotateCwIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import {
   useExports,
   useJobs,
   useProject,
+  useRetrySourceVideo,
   useSourceVideos,
   useTriggerEditPlan,
   useUploadSourceVideo,
@@ -70,6 +71,7 @@ export default function ProjectDetailPage() {
   const { data: exports } = useExports(id);
   const uploadVideo = useUploadSourceVideo(id);
   const deleteVideo = useDeleteSourceVideo(id);
+  const retryVideo = useRetrySourceVideo(id);
   const triggerEditPlan = useTriggerEditPlan(id);
   const createExport = useCreateExport(id);
 
@@ -79,6 +81,7 @@ export default function ProjectDetailPage() {
   const [uploadingCount, setUploadingCount] = useState(0);
   const [currentUpload, setCurrentUpload] = useState<{ name: string; progress: number } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [quality, setQuality] = useState<ExportQuality>("1080p");
@@ -92,6 +95,17 @@ export default function ProjectDetailPage() {
       setError(err instanceof ApiError ? err.message : "Could not remove clip");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function onRetry(sourceVideoId: string) {
+    setRetryingId(sourceVideoId);
+    try {
+      await retryVideo.mutateAsync(sourceVideoId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not restart processing");
+    } finally {
+      setRetryingId(null);
     }
   }
 
@@ -262,6 +276,19 @@ export default function ProjectDetailPage() {
                     </span>
                     <div className="flex items-center gap-2">
                       <Badge variant={STATUS_VARIANT[video.status]}>{STATUS_LABEL[video.status]}</Badge>
+                      {(video.status === "uploaded" || video.status === "failed") && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label="Retry processing"
+                          title="Stuck? Restart processing for this clip."
+                          disabled={retryingId === video.id}
+                          onClick={() => onRetry(video.id)}
+                        >
+                          <RotateCwIcon className="text-muted-foreground" />
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         variant="ghost"
