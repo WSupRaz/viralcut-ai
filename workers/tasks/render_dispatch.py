@@ -22,7 +22,24 @@ from workers.storage import download_to_path, upload_from_path
 # seek, but combined with a re-encoded output ffmpeg still decodes forward
 # to the exact requested frame -- frame-accurate cuts at arbitrary
 # (non-keyframe) timestamps, which is exactly what Claude's timeline gives us.
-ENCODE_ARGS = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac", "-ar", "48000"]
+#
+# -threads 1 -bf 0: measured directly against a 4K source -- default
+# (unset) threads peaked at 2.46GB RSS trimming a raw 4K clip, ~5x a
+# free-tier Render instance's entire 512MB ceiling. Capping the decoded
+# frame size matters more than thread count here, though: even
+# single-threaded at full 4K-in/1080p-out the decoder alone still peaked
+# at 614MB (still over budget) because it has to materialize full-res
+# reference frames before the scale filter ever runs. Export quality
+# options only go up to 1080p (see ExportQuality/roadmap -- 4K export
+# isn't built), so there's no reason this intermediate cut should ever
+# carry more than 720p through the pipeline; capped there, measured peak
+# dropped to 330MB, comfortably inside budget alongside everything else
+# this container is holding at once.
+ENCODE_ARGS = [
+    "-vf", "scale=1280:1280:force_original_aspect_ratio=decrease",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-bf", "0",
+    "-c:a", "aac", "-ar", "48000",
+]
 
 RENDER_WORKER_TIMEOUT_SECONDS = 300.0
 
@@ -31,6 +48,12 @@ def _trim_clip(input_path: Path, output_path: Path, start: float, end: float) ->
     subprocess.run(
         [
             "ffmpeg", "-y",
+            # Global, before -i: constrains decoder threads too, not just
+            # the encoder -- placed after -i it only throttles encoding,
+            # leaving the (much larger) decode-side 4K frame buffering
+            # unconstrained. See ENCODE_ARGS comment above for why this
+            # placement specifically was verified to matter.
+            "-threads", "1",
             "-ss", str(start), "-to", str(end),
             "-i", str(input_path),
             *ENCODE_ARGS,

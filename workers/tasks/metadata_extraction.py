@@ -34,6 +34,7 @@ def _extract_audio(video_path: Path, audio_path: Path) -> None:
     subprocess.run(
         [
             "ffmpeg", "-y",
+            "-threads", "1",
             "-i", str(video_path),
             "-vn", "-ac", "1", "-ar", "16000",
             "-c:a", "libmp3lame", "-b:a", "64k",
@@ -51,7 +52,7 @@ def _detect_silences(audio_path: Path) -> list[dict]:
     ffmpeg logs the filter's silence_start/silence_end markers."""
     result = subprocess.run(
         [
-            "ffmpeg", "-i", str(audio_path),
+            "ffmpeg", "-threads", "1", "-i", str(audio_path),
             "-af", f"silencedetect=noise={SILENCE_NOISE_THRESHOLD_DB}:d={SILENCE_MIN_DURATION_SECONDS}",
             "-f", "null", "-",
         ],
