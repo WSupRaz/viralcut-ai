@@ -1,15 +1,27 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useRef, useState } from "react";
-import { Trash2Icon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { DownloadIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ApiError } from "@/lib/api-client";
-import { useDeleteSourceVideo, useProject, useSourceVideos, useUploadSourceVideo } from "@/lib/query/hooks";
-import type { SourceVideoStatus } from "@/types/api";
+import {
+  useCreateExport,
+  useDeleteSourceVideo,
+  useEditPlans,
+  useExports,
+  useJobs,
+  useProject,
+  useSourceVideos,
+  useTriggerEditPlan,
+  useUploadSourceVideo,
+} from "@/lib/query/hooks";
+import type { ExportQuality, JobStatus, SourceVideoStatus } from "@/types/api";
 
 const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/x-m4v"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
@@ -28,12 +40,38 @@ const STATUS_LABEL: Record<SourceVideoStatus, string> = {
   failed: "Failed",
 };
 
+const JOB_STATUS_VARIANT: Record<JobStatus, "secondary" | "default" | "destructive" | "outline"> = {
+  queued: "secondary",
+  running: "default",
+  retrying: "default",
+  succeeded: "default",
+  failed: "destructive",
+};
+
+const JOB_STATUS_LABEL: Record<JobStatus, string> = {
+  queued: "Queued",
+  running: "Rendering...",
+  retrying: "Retrying...",
+  succeeded: "Ready",
+  failed: "Failed",
+};
+
+const QUALITY_ITEMS: { value: ExportQuality; label: string }[] = [
+  { value: "720p", label: "720p" },
+  { value: "1080p", label: "1080p (recommended)" },
+];
+
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: project } = useProject(id);
   const { data: sourceVideos } = useSourceVideos(id);
+  const { data: jobs } = useJobs(id);
+  const { data: editPlans } = useEditPlans(id);
+  const { data: exports } = useExports(id);
   const uploadVideo = useUploadSourceVideo(id);
   const deleteVideo = useDeleteSourceVideo(id);
+  const triggerEditPlan = useTriggerEditPlan(id);
+  const createExport = useCreateExport(id);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadControllerRef = useRef<AbortController | null>(null);
@@ -41,6 +79,9 @@ export default function ProjectDetailPage() {
   const [uploadingCount, setUploadingCount] = useState(0);
   const [currentUpload, setCurrentUpload] = useState<{ name: string; progress: number } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [quality, setQuality] = useState<ExportQuality>("1080p");
 
   async function onDelete(sourceVideoId: string) {
     if (!window.confirm("Remove this clip? This can't be undone.")) return;
@@ -53,6 +94,43 @@ export default function ProjectDetailPage() {
       setDeletingId(null);
     }
   }
+
+  async function onGeneratePlan() {
+    setPlanError(null);
+    try {
+      await triggerEditPlan.mutateAsync();
+    } catch (err) {
+      setPlanError(err instanceof ApiError ? err.message : "Could not start edit-plan generation");
+    }
+  }
+
+  async function onCreateExport() {
+    if (!latestPlan) return;
+    setExportError(null);
+    try {
+      await createExport.mutateAsync({ edit_plan_id: latestPlan.id, aspect_ratio: "9:16", quality });
+    } catch (err) {
+      setExportError(err instanceof ApiError ? err.message : "Could not start export");
+    }
+  }
+
+  const latestPlan = editPlans?.[0];
+  const allMetadataReady =
+    !!sourceVideos && sourceVideos.length > 0 && sourceVideos.every((v) => v.status === "metadata_ready");
+  const editPlanJob = jobs?.find((j) => j.type === "edit_plan" && j.status !== "succeeded" && j.status !== "failed");
+  const planDuration = latestPlan
+    ? Math.max(0, ...latestPlan.plan_json.timeline.map((c) => c.output_end))
+    : 0;
+
+  const queryClient = useQueryClient();
+  const wasGeneratingRef = useRef(false);
+  useEffect(() => {
+    const isGenerating = !!editPlanJob;
+    if (wasGeneratingRef.current && !isGenerating) {
+      queryClient.invalidateQueries({ queryKey: ["projects", id, "edit-plans"] });
+    }
+    wasGeneratingRef.current = isGenerating;
+  }, [editPlanJob, queryClient, id]);
 
   async function onFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -202,6 +280,131 @@ export default function ProjectDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Edit plan</CardTitle>
+          <CardDescription>
+            Claude picks the strongest moments from your footage and assembles a cut list around your
+            chosen style.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {!sourceVideos || sourceVideos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Upload a video first.</p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                onClick={onGeneratePlan}
+                disabled={!allMetadataReady || !!editPlanJob || triggerEditPlan.isPending}
+              >
+                <SparklesIcon />
+                {editPlanJob
+                  ? "Generating..."
+                  : latestPlan
+                    ? "Regenerate edit plan"
+                    : "Generate edit plan"}
+              </Button>
+              {!allMetadataReady && !editPlanJob && (
+                <p className="text-sm text-muted-foreground">
+                  Waiting for all clips to finish processing first.
+                </p>
+              )}
+              {planError && <p className="w-full text-sm text-destructive">{planError}</p>}
+            </div>
+          )}
+
+          {latestPlan && (
+            <>
+              <Separator />
+              <div className="flex flex-col gap-3">
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-lg border px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Hook</p>
+                    <p className="text-lg font-semibold">{latestPlan.viral_score.hook_score}</p>
+                  </div>
+                  <div className="rounded-lg border px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Retention</p>
+                    <p className="text-lg font-semibold">{latestPlan.viral_score.retention_score}</p>
+                  </div>
+                  <div className="rounded-lg border px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Engagement</p>
+                    <p className="text-lg font-semibold">{latestPlan.viral_score.engagement_score}</p>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">{latestPlan.viral_score.reasoning}</p>
+                <p className="text-xs text-muted-foreground">
+                  {latestPlan.plan_json.timeline.length} clip
+                  {latestPlan.plan_json.timeline.length === 1 ? "" : "s"} -- ~
+                  {Math.round(planDuration)}s output
+                </p>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {latestPlan && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Export</CardTitle>
+            <CardDescription>Vertical (9:16) only for now.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <Select
+                items={QUALITY_ITEMS}
+                value={quality}
+                onValueChange={(value) => value && setQuality(value as ExportQuality)}
+              >
+                <SelectTrigger className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUALITY_ITEMS.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button type="button" onClick={onCreateExport} disabled={createExport.isPending}>
+                {createExport.isPending ? "Starting..." : "Start export"}
+              </Button>
+              {exportError && <p className="w-full text-sm text-destructive">{exportError}</p>}
+            </div>
+
+            {exports && exports.length > 0 && (
+              <>
+                <Separator />
+                <ul className="flex flex-col gap-2">
+                  {exports.map((exp) => (
+                    <li
+                      key={exp.id}
+                      className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                    >
+                      <span className="text-muted-foreground">{exp.quality}</span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={JOB_STATUS_VARIANT[exp.job_status]}>
+                          {JOB_STATUS_LABEL[exp.job_status]}
+                        </Badge>
+                        {exp.job_status === "succeeded" && exp.download_url && (
+                          <a href={exp.download_url} target="_blank" rel="noreferrer">
+                            <Button type="button" variant="ghost" size="icon-sm" aria-label="Download export">
+                              <DownloadIcon className="text-muted-foreground" />
+                            </Button>
+                          </a>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
