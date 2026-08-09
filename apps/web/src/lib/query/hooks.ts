@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import { api, type UploadProgressCallback } from "@/lib/api-client";
 import { useAuthStore } from "@/stores/auth-store";
 import type { Job } from "@/types/api";
 
@@ -76,10 +76,35 @@ export function useUploadSourceVideo(projectId: string) {
   const token = useToken();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (file: File) => {
-      const presign = await api.presignUpload(token, projectId, file.name, file.type);
-      await api.uploadToR2(presign.upload_url, file);
-      return api.confirmUpload(token, projectId, presign.source_video_id);
+    mutationFn: async ({
+      file,
+      onProgress,
+      signal,
+    }: {
+      file: File;
+      onProgress?: UploadProgressCallback;
+      signal?: AbortSignal;
+    }) => {
+      let sourceVideoId: string | null = null;
+      try {
+        const presign = await api.presignUpload(token, projectId, file.name, file.type);
+        sourceVideoId = presign.source_video_id;
+        await api.uploadToR2(presign.upload_url, file, onProgress, signal);
+        return await api.confirmUpload(token, projectId, sourceVideoId);
+      } catch (error) {
+        // The presign API creates the row before the browser begins its direct
+        // upload. Remove that incomplete row (and any partial object) when an
+        // upload fails or is cancelled so it cannot masquerade as uploaded.
+        if (sourceVideoId) {
+          try {
+            await api.deleteSourceVideo(token, projectId, sourceVideoId);
+          } catch {
+            // Preserve the original upload error; a later manual delete can
+            // still clean up if the best-effort cleanup request also fails.
+          }
+        }
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects", projectId, "source-videos"] });

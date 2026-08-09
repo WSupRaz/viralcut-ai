@@ -12,6 +12,7 @@ import { useDeleteSourceVideo, useProject, useSourceVideos, useUploadSourceVideo
 import type { SourceVideoStatus } from "@/types/api";
 
 const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/x-m4v"];
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 
 const STATUS_VARIANT: Record<SourceVideoStatus, "secondary" | "default" | "destructive" | "outline"> = {
   uploaded: "secondary",
@@ -35,8 +36,10 @@ export default function ProjectDetailPage() {
   const deleteVideo = useDeleteSourceVideo(id);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadControllerRef = useRef<AbortController | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
+  const [currentUpload, setCurrentUpload] = useState<{ name: string; progress: number } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function onDelete(sourceVideoId: string) {
@@ -62,16 +65,39 @@ export default function ProjectDetailPage() {
       return;
     }
 
+    const tooLarge = files.filter((file) => file.size > MAX_UPLOAD_BYTES);
+    if (tooLarge.length > 0) {
+      setError(
+        `${tooLarge.map((file) => file.name).join(", ")} is larger than the 5 GB upload limit. Split the file or choose a smaller export.`
+      );
+      return;
+    }
+
     setError(null);
     setUploadingCount(files.length);
     try {
       for (const file of files) {
-        await uploadVideo.mutateAsync(file);
+        const controller = new AbortController();
+        uploadControllerRef.current = controller;
+        setCurrentUpload({ name: file.name, progress: 0 });
+        await uploadVideo.mutateAsync({
+          file,
+          signal: controller.signal,
+          onProgress: (progress) => setCurrentUpload({ name: file.name, progress }),
+        });
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Upload failed");
+      setError(
+        err instanceof DOMException && err.name === "AbortError"
+          ? "Upload cancelled. The incomplete clip was removed."
+          : err instanceof ApiError
+            ? err.message
+            : "Upload failed"
+      );
     } finally {
       setUploadingCount(0);
+      setCurrentUpload(null);
+      uploadControllerRef.current = null;
     }
   }
 
@@ -90,11 +116,11 @@ export default function ProjectDetailPage() {
         <CardHeader>
           <CardTitle>Source videos</CardTitle>
           <CardDescription>
-            Upload mp4, mov, or m4v files. Each one is transcribed and analyzed automatically.
+            Upload mp4, mov, or m4v files up to 5 GB each. Each one is transcribed and analyzed automatically.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div>
+          <div className="flex flex-wrap items-center gap-3">
             <input
               ref={fileInputRef}
               type="file"
@@ -110,7 +136,37 @@ export default function ProjectDetailPage() {
             >
               {uploadingCount > 0 ? `Uploading ${uploadingCount}...` : "Upload video(s)"}
             </Button>
-            {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+            {uploadingCount > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => uploadControllerRef.current?.abort()}
+              >
+                Cancel upload
+              </Button>
+            )}
+            {currentUpload && (
+              <div className="flex min-w-0 items-center gap-3 rounded-lg border bg-muted/40 px-3 py-2">
+                <div
+                  className="grid size-11 shrink-0 place-items-center rounded-full"
+                  style={{
+                    background: `conic-gradient(var(--primary) ${currentUpload.progress * 3.6}deg, var(--muted) 0deg)`,
+                  }}
+                  aria-label={`${currentUpload.progress}% uploaded`}
+                >
+                  <div className="grid size-8 place-items-center rounded-full bg-card text-[10px] font-semibold">
+                    {currentUpload.progress}%
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{currentUpload.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {currentUpload.progress === 0 ? "Connecting to secure storage..." : "Uploading securely"}
+                  </p>
+                </div>
+              </div>
+            )}
+            {error && <p className="w-full text-sm text-destructive">{error}</p>}
           </div>
 
           {sourceVideos && sourceVideos.length > 0 && (

@@ -20,6 +20,10 @@ export class ApiError extends Error {
   }
 }
 
+export type UploadProgressCallback = (progress: number) => void;
+
+const UPLOAD_TIMEOUT_MS = 60 * 60 * 1000;
+
 async function request<T>(
   path: string,
   options: { method?: string; body?: unknown; token?: string | null } = {}
@@ -81,14 +85,53 @@ export const api = {
       token,
     }),
 
-  uploadToR2: async (uploadUrl: string, file: File) => {
-    const res = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": file.type },
-      body: file,
-    });
-    if (!res.ok) throw new ApiError(res.status, "Upload to storage failed");
-  },
+  uploadToR2: (
+    uploadUrl: string,
+    file: File,
+    onProgress?: UploadProgressCallback,
+    signal?: AbortSignal
+  ) =>
+    new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      let settled = false;
+
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        signal?.removeEventListener("abort", abortUpload);
+        callback();
+      };
+
+      const abortUpload = () => xhr.abort();
+      if (signal?.aborted) {
+        reject(new DOMException("Upload cancelled", "AbortError"));
+        return;
+      }
+
+      signal?.addEventListener("abort", abortUpload, { once: true });
+      xhr.open("PUT", uploadUrl);
+      xhr.timeout = UPLOAD_TIMEOUT_MS;
+      xhr.setRequestHeader("Content-Type", file.type);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          onProgress?.(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          onProgress?.(100);
+          finish(resolve);
+          return;
+        }
+        finish(() => reject(new ApiError(xhr.status, "Upload to storage failed")));
+      };
+      xhr.onerror = () => finish(() => reject(new ApiError(0, "Network error while uploading video")));
+      xhr.ontimeout = () =>
+        finish(() => reject(new ApiError(0, "Upload timed out. Check your connection and try again.")));
+      xhr.onabort = () => finish(() => reject(new DOMException("Upload cancelled", "AbortError")));
+      xhr.send(file);
+    }),
 
   confirmUpload: (token: string, projectId: string, sourceVideoId: string) =>
     request<Job>(`/api/v1/projects/${projectId}/source-videos/${sourceVideoId}/confirm-upload`, {
