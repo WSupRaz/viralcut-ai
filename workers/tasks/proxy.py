@@ -32,12 +32,20 @@ def _probe_duration_seconds(path: Path) -> Decimal:
 
 
 def _transcode_proxy(input_path: Path, output_path: Path) -> None:
+    # Unset thread count auto-scales to every CPU the container reports
+    # (8 here) -- decoding a 4K source across that many threads holds that
+    # many ~12MB raw frames in flight at once, easily enough to blow a
+    # free-tier instance's 512MB RAM ceiling before encoding even starts.
+    # Single-threaded is slower but bounds decode memory to ~one frame at a
+    # time; -bf 0 avoids the encoder buffering frames for B-frame reordering.
     subprocess.run(
         [
             "ffmpeg", "-y",
+            "-threads", "1",
             "-i", str(input_path),
             "-vf", f"scale=-2:{PROXY_HEIGHT}",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+            "-bf", "0",
             "-c:a", "aac", "-b:a", "96k",
             "-movflags", "+faststart",
             str(output_path),
