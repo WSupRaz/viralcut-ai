@@ -28,6 +28,21 @@ if __name__ == "__main__":
     # the other half (waking this service back up after it idles out).
     threading.Thread(target=serve_health, daemon=True).start()
     subprocess.run(
-        ["celery", "-A", "workers.celery_app:celery_app", "worker", "--loglevel=info"],
+        [
+            "celery",
+            "-A",
+            "workers.celery_app:celery_app",
+            "worker",
+            "--loglevel=info",
+            # Celery's prefork pool defaults concurrency to the container's
+            # reported CPU count, with no idea how little RAM a free-tier
+            # instance actually has (512MB). Each forked process can run
+            # ffmpeg/ASR/Claude calls, so 8 of them (this host's CPU count)
+            # running concurrently reliably OOMs and gets silently killed
+            # mid-task -- the task just vanishes with no error, and the
+            # service restarts from scratch. One process at a time is safe;
+            # revisit only after moving off the free tier.
+            "--concurrency=1",
+        ],
         check=True,
     )
