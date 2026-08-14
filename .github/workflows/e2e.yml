@@ -10,6 +10,8 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
@@ -23,10 +25,42 @@ jobs:
         run: docker compose -f infra/docker-compose.dev.yml build api worker render-worker
 
       - name: Boot the stack (postgres, redis, minio, api, worker)
+        id: boot
         run: |
+          set +e
           docker compose -f infra/docker-compose.dev.yml up -d \
-            postgres redis minio minio-init api worker render-worker
-          docker compose -f infra/docker-compose.dev.yml ps
+            postgres redis minio minio-init api worker render-worker > /tmp/boot.log 2>&1
+          RC=$?
+          docker compose -f infra/docker-compose.dev.yml ps >> /tmp/boot.log 2>&1
+          echo "RC=$RC" >> /tmp/boot.log
+          cat /tmp/boot.log
+          exit $RC
+
+      # The Actions logs API needs repo-admin, so on failure mirror the boot
+      # output as a public check-run annotation (readable via the checks API).
+      - name: Publish boot diagnostics
+        if: failure() && steps.boot.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          log = open('/tmp/boot.log', errors='replace').read()[-4000:]
+          body = json.dumps({
+              "name": "boot-diagnostics",
+              "head_sha": "${{ github.sha }}",
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {"title": "docker compose up failed", "summary": "```\n" + log + "\n```"},
+          }).encode()
+          req = urllib.request.Request(
+              "https://api.github.com/repos/${{ github.repository }}/check-runs",
+              data=body, method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "Content-Type": "application/json"})
+          print(urllib.request.urlopen(req).status)
+          PY
 
       - name: Wait for API health (api auto-migrates on boot)
         run: |
