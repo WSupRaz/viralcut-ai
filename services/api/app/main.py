@@ -27,7 +27,13 @@ def _run_migrations() -> None:
 async def lifespan(_: FastAPI):
     # env.py drives an async engine with asyncio.run(), so run it in a worker
     # thread -- we're already inside uvicorn's event loop here.
-    await asyncio.to_thread(_run_migrations)
+    try:
+        await asyncio.to_thread(_run_migrations)
+    except Exception as exc:  # noqa: BLE001 -- never block startup on a
+        # migration problem; log it so a deploy still swaps in and the exact
+        # failure is visible in the host's logs (the API's DB queries will
+        # fail loudly on their own if the schema is genuinely out of date).
+        print(f"[startup] alembic upgrade head FAILED (continuing): {exc}", flush=True)
     yield
 
 

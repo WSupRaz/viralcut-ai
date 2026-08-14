@@ -16,10 +16,17 @@ jobs:
       - name: Prepare env
         run: cp .env.example .env
 
+      - name: Docker info
+        run: docker version --format 'server={{.Server.Version}}' && docker compose version
+
+      - name: Build images
+        run: docker compose -f infra/docker-compose.dev.yml build api worker render-worker
+
       - name: Boot the stack (postgres, redis, minio, api, worker)
         run: |
           docker compose -f infra/docker-compose.dev.yml up -d \
             postgres redis minio minio-init api worker render-worker
+          docker compose -f infra/docker-compose.dev.yml ps
 
       - name: Wait for API health (api auto-migrates on boot)
         run: |
@@ -77,7 +84,8 @@ jobs:
       - name: Upload logs on failure
         if: failure()
         run: |
-          docker compose -f infra/docker-compose.dev.yml logs --tail 60 api worker > /tmp/stack.log 2>&1 || true
-          cat /tmp/web.log 2>/dev/null || true
-          echo "--- stack logs ---"
-          tail -80 /tmp/stack.log 2>/dev/null || true
+          docker compose -f infra/docker-compose.dev.yml ps -a > /tmp/ps.log 2>&1 || true
+          docker compose -f infra/docker-compose.dev.yml logs --tail 80 > /tmp/stack.log 2>&1 || true
+          echo "--- docker ps ---"; cat /tmp/ps.log
+          echo "--- compose logs ---"; tail -120 /tmp/stack.log
+          echo "--- web log ---"; cat /tmp/web.log 2>/dev/null || true
