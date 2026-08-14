@@ -216,18 +216,28 @@ ephemeral disk; if proxy generation fails with a disk-full style error, set
 (`workers/ffmpeg.py` and the pipeline stream everything -- memory is bounded
 by the `-threads 1` decode caps already in place, disk is the real floor).
 
-## Step 5b -- Run the new upload migration
+## Step 5b/6 -- Migrations now run automatically on boot
 
-The resumable-upload schema (new columns on `source_videos`/`jobs`) ships as
-alembic revision `b3f2a1c9d4e0`. Same manual step as Step 6 below; do it
-once, before first deploy.
+No manual migration step is needed anymore: the `api` container runs
+`alembic upgrade head` before uvicorn starts (`infra/docker/api.Dockerfile`
+CMD -> `services/api/entrypoint.sh`) *and* again at app startup
+(`app/main.py` lifespan) as a fallback for PaaS configs that override the
+Docker CMD. Migrations are idempotent (`IF NOT EXISTS`) and Alembic's
+version table makes the second run a no-op, so concurrent replica boots are
+safe. Every deploy self-heals the schema.
 
-## Step 6 -- Run migrations
+If a migration genuinely fails (e.g. the DB's `alembic_version` doesn't
+chain to this code's revisions), the container logs the exact error and
+boots anyway -- do **not** treat that as success; the log line starting
+`[entrypoint]` is the diagnosis to paste back. Expected healthy boot logs:
 
-Render's **Shell** tab (for running one-off commands against a live
-service) is a paid-plan-only feature -- not available on the Free instance
-type. Run migrations from your own machine against Neon instead, using the
-same `api` Docker image you already build for local dev:
+```
+[entrypoint] Current DB revision: c7d8e9f0a1b2
+[entrypoint] Migrations up to date.
+[entrypoint] Starting API on 0.0.0.0:8000
+```
+
+(Manual alternative, if you ever need it from your own machine:)
 
 ```bash
 docker compose -f infra/docker-compose.dev.yml build api
@@ -235,16 +245,6 @@ docker compose -f infra/docker-compose.dev.yml run --rm \
   -e DATABASE_URL="postgresql+asyncpg://<user>:<password>@<neon-host>/<db>?ssl=require" \
   api alembic upgrade head
 ```
-
-(No `cd services/api` needed -- `api.Dockerfile`'s last `WORKDIR` is already
-`/app/services/api`.) This spins up the local Postgres/Redis/MinIO sidecars
-too since they're declared as `depends_on` in the compose file, but the
-migration itself only touches the `DATABASE_URL` you passed in -- Neon, not
-the local sidecar Postgres.
-
-Re-run this any time a new migration is added (same manual, deliberate step
-used throughout local development -- no auto-migrate-on-boot, to avoid
-concurrent migration races if a service restarts mid-deploy).
 
 ## Step 7 -- Vercel: frontend
 
@@ -280,6 +280,11 @@ Redeploy `api` for the change to take effect.
 4. Confirm the final export downloads and plays. If the render fails with
    an OOM-looking error, that's the 512MB free-tier RAM ceiling on
    `render-worker` -- bump just that service to a paid instance type.
+
+If the API returns `500` on `GET /projects/{id}/source-videos` after a
+deploy, the schema migration didn't apply -- check the `api` service's
+Render logs for the `[entrypoint]` line (see Step 5b/6). With the current
+code this is self-healing: a fresh deploy runs the migration on boot.
 
 ## Costs
 
