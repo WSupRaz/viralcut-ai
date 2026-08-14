@@ -22,16 +22,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column('source_videos', sa.Column('size_bytes', sa.BigInteger(), nullable=True))
-    op.add_column('source_videos', sa.Column('upload_id', sa.Text(), nullable=True))
-    op.add_column('source_videos', sa.Column('original_filename', sa.Text(), nullable=True))
-    op.add_column('source_videos', sa.Column('content_type', sa.Text(), nullable=True))
-    op.add_column('jobs', sa.Column('stage', sa.Text(), nullable=True))
+    # Idempotent (IF NOT EXISTS): the API runs `alembic upgrade head` on every
+    # boot, so concurrent replica starts must never collide.
+    op.execute("ALTER TABLE source_videos ADD COLUMN IF NOT EXISTS size_bytes BIGINT")
+    op.execute("ALTER TABLE source_videos ADD COLUMN IF NOT EXISTS upload_id TEXT")
+    op.execute("ALTER TABLE source_videos ADD COLUMN IF NOT EXISTS original_filename TEXT")
+    op.execute("ALTER TABLE source_videos ADD COLUMN IF NOT EXISTS content_type TEXT")
+    op.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stage TEXT")
 
 
 def downgrade() -> None:
-    op.drop_column('jobs', 'stage')
-    op.drop_column('source_videos', 'content_type')
-    op.drop_column('source_videos', 'original_filename')
-    op.drop_column('source_videos', 'upload_id')
-    op.drop_column('source_videos', 'size_bytes')
+    op.execute("ALTER TABLE jobs DROP COLUMN IF EXISTS stage")
+    op.execute("ALTER TABLE source_videos DROP COLUMN IF EXISTS content_type")
+    op.execute("ALTER TABLE source_videos DROP COLUMN IF EXISTS original_filename")
+    op.execute("ALTER TABLE source_videos DROP COLUMN IF EXISTS upload_id")
+    op.execute("ALTER TABLE source_videos DROP COLUMN IF EXISTS size_bytes")

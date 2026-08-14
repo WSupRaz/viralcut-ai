@@ -22,12 +22,14 @@ RUN pip install -r requirements.txt
 COPY packages/db_models ./packages/db_models
 COPY packages/edit-plan-schema/python/edit_plan_schema ./packages/edit_plan_schema
 COPY services/api ./services/api
+COPY services/api/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
 
 WORKDIR /app/services/api
 
 EXPOSE 8000
 
-# Shell form (not exec form) so $PORT expands -- Railway (and most PaaS)
-# assign a dynamic port via this env var; falls back to 8000 for plain
-# `docker compose up` where nothing sets it.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Migrate-on-boot then serve. Shell form (not exec form) so $PORT expands --
+# Railway (and most PaaS) assign a dynamic port via this env var; falls back
+# to 8000 for plain `docker compose up` where nothing sets it.
+CMD ["./entrypoint.sh"]
