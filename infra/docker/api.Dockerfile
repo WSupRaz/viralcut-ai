@@ -22,8 +22,11 @@ RUN pip install -r requirements.txt
 COPY packages/db_models ./packages/db_models
 COPY packages/edit-plan-schema/python/edit_plan_schema ./packages/edit_plan_schema
 COPY services/api ./services/api
-COPY services/api/entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh
+# entrypoint.sh ships via `COPY services/api` (mode 100644 on Windows
+# checkouts) -- make it executable, otherwise runc fails with
+# "./entrypoint.sh: permission denied" on Linux hosts (Render/CI). Local
+# dev never noticed because compose bind-mounts the source dir on top.
+RUN chmod +x /app/services/api/entrypoint.sh
 
 WORKDIR /app/services/api
 
