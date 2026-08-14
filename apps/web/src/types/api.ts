@@ -43,13 +43,29 @@ export interface SourceVideo {
   order_index: number;
   status: SourceVideoStatus;
   duration_seconds: string | null;
+  original_filename: string | null;
+  size_bytes: number | null;
+  /** True while a multipart upload session is still open (resumable). */
+  upload_pending: boolean;
   created_at: string;
 }
 
-export interface SourceVideoPresignResponse {
+export interface UploadStartResponse {
   source_video_id: string;
-  upload_url: string;
+  upload_id: string;
   r2_key: string;
+  part_size: number;
+  part_count: number;
+}
+
+export interface UploadPart {
+  part_number: number;
+  size: number;
+}
+
+export interface UploadPartUrl {
+  part_number: number;
+  upload_url: string;
 }
 
 export type JobType = "proxy" | "metadata_extraction" | "edit_plan" | "render";
@@ -58,9 +74,12 @@ export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "retryin
 export interface Job {
   id: string;
   project_id: string;
+  /** Set for per-clip jobs (proxy, metadata); null for project-level jobs. */
+  source_video_id: string | null;
   type: JobType;
   status: JobStatus;
   progress_pct: number;
+  stage: string | null;
   error: string | null;
   retry_count: number;
   created_at: string;

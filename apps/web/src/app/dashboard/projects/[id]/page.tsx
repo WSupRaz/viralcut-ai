@@ -1,15 +1,26 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DownloadIcon, RotateCwIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { api as apiClient } from "@/lib/api-client";
+import { useAuthStore } from "@/stores/auth-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { ApiError } from "@/lib/api-client";
+import {
+  clearUploadSession,
+  formatBytes,
+  formatUploadProgress,
+  loadUploadSession,
+  PausedUploadError,
+  type UploadProgress,
+  type UploadSession,
+} from "@/lib/upload-client";
 import {
   useCreateExport,
   useDeleteSourceVideo,
@@ -22,7 +33,7 @@ import {
   useTriggerEditPlan,
   useUploadSourceVideo,
 } from "@/lib/query/hooks";
-import type { ExportQuality, JobStatus, SourceVideoStatus } from "@/types/api";
+import type { ExportQuality, Job, JobStatus, SourceVideoStatus } from "@/types/api";
 
 const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/x-m4v"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
@@ -51,10 +62,17 @@ const JOB_STATUS_VARIANT: Record<JobStatus, "secondary" | "default" | "destructi
 
 const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   queued: "Queued",
-  running: "Rendering...",
+  running: "Processing...",
   retrying: "Retrying...",
   succeeded: "Ready",
   failed: "Failed",
+};
+
+const JOB_TYPE_LABEL: Record<string, string> = {
+  proxy: "Proxy",
+  metadata_extraction: "Metadata",
+  edit_plan: "Edit plan",
+  render: "Render",
 };
 
 const QUALITY_ITEMS: { value: ExportQuality; label: string }[] = [
@@ -79,12 +97,57 @@ export default function ProjectDetailPage() {
   const uploadControllerRef = useRef<AbortController | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
-  const [currentUpload, setCurrentUpload] = useState<{ name: string; progress: number } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  // A stored-but-not-running upload session (page refreshed mid-upload, or a
+  // network failure paused it) -- the user re-selects the same file to resume.
+  const [pausedSession, setPausedSession] = useState<UploadSession | null>(null);
+  const [pausedPercent, setPausedPercent] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [quality, setQuality] = useState<ExportQuality>("1080p");
+
+  const queryClient = useQueryClient();
+  const token = useAuthStore((s) => s.token) ?? "";
+
+  // Restore an interrupted upload session after a refresh: fetch how far the
+  // server got, and offer to resume from there instead of starting over.
+  useEffect(() => {
+    const session = loadUploadSession(id);
+    if (!session || !token) return;
+    setPausedSession(session);
+    let cancelled = false;
+    apiClient
+      .getUploadParts(token, id, session.sourceVideoId)
+      .then((parts) => {
+        if (cancelled) return;
+        const uploaded = parts.reduce((sum, p) => sum + p.size, 0);
+        setPausedPercent(
+          session.fileSize > 0 ? Math.min(100, (uploaded / session.fileSize) * 100) : 0
+        );
+      })
+      .catch(() => {
+        // Server session may have expired -- Discard will clean it up.
+        if (!cancelled) setPausedPercent(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, token]);
+
+  async function onDiscardPaused() {
+    const session = pausedSession;
+    setPausedSession(null);
+    clearUploadSession(id);
+    if (!session) return;
+    try {
+      await apiClient.deleteSourceVideo(token, id, session.sourceVideoId);
+    } catch {
+      // Best-effort; the abandoned-upload sweep cleans up server-side.
+    }
+  }
 
   async function onDelete(sourceVideoId: string) {
     if (!window.confirm("Remove this clip? This can't be undone.")) return;
@@ -128,23 +191,49 @@ export default function ProjectDetailPage() {
     }
   }
 
-  const latestPlan = editPlans?.[0];
-  const allMetadataReady =
-    !!sourceVideos && sourceVideos.length > 0 && sourceVideos.every((v) => v.status === "metadata_ready");
-  const editPlanJob = jobs?.find((j) => j.type === "edit_plan" && j.status !== "succeeded" && j.status !== "failed");
-  const planDuration = latestPlan
-    ? Math.max(0, ...latestPlan.plan_json.timeline.map((c) => c.output_end))
-    : 0;
-
-  const queryClient = useQueryClient();
-  const wasGeneratingRef = useRef(false);
-  useEffect(() => {
-    const isGenerating = !!editPlanJob;
-    if (wasGeneratingRef.current && !isGenerating) {
-      queryClient.invalidateQueries({ queryKey: ["projects", id, "edit-plans"] });
-    }
-    wasGeneratingRef.current = isGenerating;
-  }, [editPlanJob, queryClient, id]);
+  const runUpload = useCallback(
+    async (file: File, resumeExisting: boolean) => {
+      const controller = new AbortController();
+      uploadControllerRef.current = controller;
+      setUploadProgress({
+        phase: "starting",
+        uploadedBytes: 0,
+        totalBytes: file.size,
+        percent: 0,
+        partNumber: 0,
+        partCount: 0,
+        etaSeconds: null,
+      });
+      try {
+        await uploadVideo.mutateAsync({
+          file,
+          signal: controller.signal,
+          resumeExisting,
+          onProgress: setUploadProgress,
+        });
+        setUploadProgress(null);
+      } catch (err) {
+        if (err instanceof PausedUploadError) {
+          // Network gave up on a part; keep the session and offer resume.
+          setPausedSession(loadUploadSession(id));
+          setUploadProgress(null);
+          setError("Upload paused due to network issues. Select the file again to resume.");
+          return;
+        }
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setError("Upload cancelled. The incomplete upload was cleaned up.");
+          setUploadProgress(null);
+          return;
+        }
+        setError(err instanceof ApiError ? err.message : "Upload failed");
+        setUploadProgress(null);
+      } finally {
+        uploadControllerRef.current = null;
+        setUploadingCount(0);
+      }
+    },
+    [id, uploadVideo]
+  );
 
   async function onFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -167,33 +256,64 @@ export default function ProjectDetailPage() {
 
     setError(null);
     setUploadingCount(files.length);
-    try {
-      for (const file of files) {
-        const controller = new AbortController();
-        uploadControllerRef.current = controller;
-        setCurrentUpload({ name: file.name, progress: 0 });
-        await uploadVideo.mutateAsync({
-          file,
-          signal: controller.signal,
-          onProgress: (progress) => setCurrentUpload({ name: file.name, progress }),
-        });
+
+    const first = files[0];
+    // Same file as a paused session? Resume in place (the session stays in
+    // localStorage so uploadVideoChunked can skip already-uploaded parts).
+    // Different file? Discard the old paused session first (its partial
+    // object is deleted server-side), then start a fresh upload.
+    if (pausedSession) {
+      const sameFile =
+        pausedSession.fileName === first.name && pausedSession.fileSize === first.size;
+      if (!sameFile) {
+        await onDiscardPaused();
+        clearUploadSession(id);
       }
-    } catch (err) {
-      setError(
-        err instanceof DOMException && err.name === "AbortError"
-          ? "Upload cancelled. The incomplete clip was removed."
-          : err instanceof ApiError
-            ? err.message
-            : "Upload failed"
-      );
-    } finally {
-      setUploadingCount(0);
-      setCurrentUpload(null);
-      uploadControllerRef.current = null;
+      setPausedSession(null);
+      await runUpload(first, sameFile);
+    } else {
+      await runUpload(first, false);
     }
   }
 
+  function onCancelUpload() {
+    uploadControllerRef.current?.abort();
+  }
+
+  const latestJobForVideo = useCallback(
+    (videoId: string) =>
+      (jobs ?? []).reduce<Job | null>(
+        (latest, j) =>
+          j.source_video_id === videoId && (!latest || j.created_at >= latest.created_at) ? j : latest,
+        null
+      ),
+    [jobs]
+  );
+
+  const latestPlan = editPlans?.[0];
+  const allMetadataReady =
+    !!sourceVideos && sourceVideos.length > 0 && sourceVideos.every((v) => v.status === "metadata_ready");
+  const editPlanJob = jobs?.find((j) => j.type === "edit_plan" && j.status !== "succeeded" && j.status !== "failed");
+  const planDuration = latestPlan
+    ? Math.max(0, ...latestPlan.plan_json.timeline.map((c) => c.output_end))
+    : 0;
+
+  const wasGeneratingRef = useRef(false);
+  useEffect(() => {
+    const isGenerating = !!editPlanJob;
+    if (wasGeneratingRef.current && !isGenerating) {
+      queryClient.invalidateQueries({ queryKey: ["projects", id, "edit-plans"] });
+    }
+    wasGeneratingRef.current = isGenerating;
+  }, [editPlanJob, queryClient, id]);
+
   if (!project) return null;
+
+  const activeJobs = (jobs ?? []).filter(
+    (j) => j.status === "queued" || j.status === "running" || j.status === "retrying"
+  );
+  const progress = uploadProgress;
+  const progressLabels = progress ? formatUploadProgress(progress) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -208,7 +328,8 @@ export default function ProjectDetailPage() {
         <CardHeader>
           <CardTitle>Source videos</CardTitle>
           <CardDescription>
-            Upload mp4, mov, or m4v files up to 5 GB each. Each one is transcribed and analyzed automatically.
+            Upload mp4, mov, or m4v files up to 5 GB each. Uploads are chunked and resumable -- a
+            dropped connection or a refresh won't force you to start a 1.2 GB file over from zero.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -224,84 +345,145 @@ export default function ProjectDetailPage() {
             <Button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploadingCount > 0}
+              disabled={uploadingCount > 0 || !!progress}
             >
-              {uploadingCount > 0 ? `Uploading ${uploadingCount}...` : "Upload video(s)"}
+              {progress ? "Uploading..." : uploadingCount > 0 ? "Uploading..." : "Upload video(s)"}
             </Button>
-            {uploadingCount > 0 && (
+            {(uploadingCount > 0 || progress) && (
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => uploadControllerRef.current?.abort()}
+                onClick={onCancelUpload}
+                disabled={!progress}
               >
                 Cancel upload
               </Button>
             )}
-            {currentUpload && (
-              <div className="flex min-w-0 items-center gap-3 rounded-lg border bg-muted/40 px-3 py-2">
-                <div
-                  className="grid size-11 shrink-0 place-items-center rounded-full"
-                  style={{
-                    background: `conic-gradient(var(--primary) ${currentUpload.progress * 3.6}deg, var(--muted) 0deg)`,
-                  }}
-                  aria-label={`${currentUpload.progress}% uploaded`}
-                >
-                  <div className="grid size-8 place-items-center rounded-full bg-card text-[10px] font-semibold">
-                    {currentUpload.progress}%
-                  </div>
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{currentUpload.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {currentUpload.progress === 0 ? "Connecting to secure storage..." : "Uploading securely"}
-                  </p>
-                </div>
-              </div>
-            )}
             {error && <p className="w-full text-sm text-destructive">{error}</p>}
           </div>
+
+          {progress && progressLabels && (
+            <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 px-4 py-3">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="truncate font-medium">
+                  {progress.phase === "verifying"
+                    ? "Verifying upload..."
+                    : progress.phase === "starting"
+                      ? "Starting upload..."
+                      : progress.retrying
+                        ? `Uploading (retrying part ${progress.partNumber}/${progress.partCount})...`
+                        : `Uploading part ${progress.partNumber}/${progress.partCount}...`}
+                </span>
+                <span className="tabular-nums text-muted-foreground">{progressLabels.percentLabel}</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: `${Math.min(100, progress.percent)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="tabular-nums">{progressLabels.bytesLabel}</span>
+                <span>{progressLabels.etaLabel ?? (progress.phase === "verifying" ? "Almost done" : " ")}</span>
+              </div>
+            </div>
+          )}
+
+          {pausedSession && (
+            <div className="flex flex-col gap-2 rounded-lg border border-dashed px-4 py-3">
+              <p className="text-sm font-medium">Upload paused -- {pausedSession.fileName}</p>
+              <p className="text-xs text-muted-foreground">
+                {Math.floor(pausedPercent)}% uploaded. Select the same file to resume from where it
+                stopped (no need to re-upload what already made it).
+              </p>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-primary" style={{ width: `${pausedPercent}%` }} />
+              </div>
+              <div className="mt-1 flex gap-2">
+                <Button type="button" size="sm" onClick={() => fileInputRef.current?.click()}>
+                  Select file to resume
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={onDiscardPaused}>
+                  Discard
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {activeJobs.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Processing:</span>
+              {activeJobs.map((job) => (
+                <Badge key={job.id} variant={JOB_STATUS_VARIANT[job.status]}>
+                  {job.stage ?? JOB_STATUS_LABEL[job.status]}
+                  {job.progress_pct > 0 && ` (${job.progress_pct}%)`}
+                </Badge>
+              ))}
+            </div>
+          )}
 
           {sourceVideos && sourceVideos.length > 0 && (
             <>
               <Separator />
               <ul className="flex flex-col gap-2">
-                {sourceVideos.map((video) => (
-                  <li
-                    key={video.id}
-                    className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
-                  >
-                    <span className="text-muted-foreground">
-                      Clip {video.order_index + 1}
-                      {video.duration_seconds && ` -- ${Math.round(Number(video.duration_seconds))}s`}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={STATUS_VARIANT[video.status]}>{STATUS_LABEL[video.status]}</Badge>
-                      {(video.status === "uploaded" || video.status === "failed") && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Retry processing"
-                          title="Stuck? Restart processing for this clip."
-                          disabled={retryingId === video.id}
-                          onClick={() => onRetry(video.id)}
-                        >
-                          <RotateCwIcon className="text-muted-foreground" />
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Remove clip"
-                        disabled={deletingId === video.id}
-                        onClick={() => onDelete(video.id)}
-                      >
-                        <Trash2Icon className="text-muted-foreground" />
-                      </Button>
-                    </div>
-                  </li>
-                ))}
+                {sourceVideos
+                  .filter((video) => !video.upload_pending)
+                  .map((video) => {
+                    const job = latestJobForVideo(video.id);
+                    const isActiveJob =
+                      job && (job.status === "queued" || job.status === "running" || job.status === "retrying");
+                    const badgeLabel = isActiveJob
+                      ? `${JOB_TYPE_LABEL[job.type] ?? "Processing"}: ${job.stage ?? JOB_STATUS_LABEL[job.status]}`
+                      : STATUS_LABEL[video.status];
+                    return (
+                      <li key={video.id} className="flex flex-col gap-1 rounded-md border px-3 py-2 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate text-muted-foreground">
+                            {video.original_filename ?? `Clip ${video.order_index + 1}`}
+                            {video.duration_seconds && ` -- ${Math.round(Number(video.duration_seconds))}s`}
+                            {video.size_bytes && ` -- ${formatBytes(video.size_bytes)}`}
+                          </span>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <Badge
+                              variant={isActiveJob ? JOB_STATUS_VARIANT[job!.status] : STATUS_VARIANT[video.status]}
+                              title={job?.error ?? undefined}
+                            >
+                              {badgeLabel}
+                              {isActiveJob && job!.progress_pct > 0 && ` (${job!.progress_pct}%)`}
+                            </Badge>
+                            {(video.status === "uploaded" || video.status === "failed") && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label="Retry processing"
+                                title="Stuck? Restart processing for this clip."
+                                disabled={retryingId === video.id}
+                                onClick={() => onRetry(video.id)}
+                              >
+                                <RotateCwIcon className="text-muted-foreground" />
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label="Remove clip"
+                              disabled={deletingId === video.id}
+                              onClick={() => onDelete(video.id)}
+                            >
+                              <Trash2Icon className="text-muted-foreground" />
+                            </Button>
+                          </div>
+                        </div>
+                        {video.status === "failed" && job?.error && (
+                          <p className="text-xs text-destructive" title={job.error}>
+                            {job.error.length > 220 ? `${job.error.slice(0, 220)}…` : job.error}
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
               </ul>
             </>
           )}
@@ -328,7 +510,7 @@ export default function ProjectDetailPage() {
               >
                 <SparklesIcon />
                 {editPlanJob
-                  ? "Generating..."
+                  ? editPlanJob.stage ?? "Generating..."
                   : latestPlan
                     ? "Regenerate edit plan"
                     : "Generate edit plan"}

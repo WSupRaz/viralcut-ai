@@ -8,9 +8,18 @@ from db_models.models.job import Job
 
 
 async def create_job(
-    db: AsyncSession, *, project_id: uuid.UUID, job_type: JobType
+    db: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    job_type: JobType,
+    source_video_id: uuid.UUID | None = None,
 ) -> Job:
-    job = Job(project_id=project_id, type=job_type, status=JobStatus.QUEUED)
+    job = Job(
+        project_id=project_id,
+        type=job_type,
+        status=JobStatus.QUEUED,
+        source_video_id=source_video_id,
+    )
     db.add(job)
     await db.commit()
     await db.refresh(job)

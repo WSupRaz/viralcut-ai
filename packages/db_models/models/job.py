@@ -12,6 +12,7 @@ from db_models.models.pg_enums import job_status_enum, job_type_enum
 if TYPE_CHECKING:
     from db_models.models.export import Export
     from db_models.models.project import Project
+    from db_models.models.source_video import SourceVideo
 
 
 class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -21,11 +22,24 @@ class Job(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    # Per-source-video jobs (proxy, metadata) point at their clip so the UI
+    # can show per-clip stage/error. Project-level jobs (edit_plan, render)
+    # leave this null.
+    source_video_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("source_videos.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     type: Mapped[JobType] = mapped_column(job_type_enum, nullable=False)
     status: Mapped[JobStatus] = mapped_column(
         job_status_enum, nullable=False, default=JobStatus.QUEUED
     )
     progress_pct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Human-readable current stage, e.g. "Downloading source", "Detecting
+    # scenes" -- set by workers so the UI can show live processing status
+    # without the frontend hardcoding task internals.
+    stage: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     celery_task_id: Mapped[str | None] = mapped_column(Text, nullable=True)

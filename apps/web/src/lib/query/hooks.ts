@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type UploadProgressCallback } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { uploadVideoChunked } from "@/lib/upload-client";
 import { useAuthStore } from "@/stores/auth-store";
 import type { Job } from "@/types/api";
 
@@ -76,7 +77,7 @@ export function useRetrySourceVideo(projectId: string) {
   const token = useToken();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (sourceVideoId: string) => api.confirmUpload(token, projectId, sourceVideoId),
+    mutationFn: (sourceVideoId: string) => api.retrySourceVideo(token, projectId, sourceVideoId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects", projectId, "source-videos"] });
       queryClient.invalidateQueries({ queryKey: ["projects", projectId, "jobs"] });
@@ -88,36 +89,25 @@ export function useUploadSourceVideo(projectId: string) {
   const token = useToken();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       file,
       onProgress,
       signal,
+      resumeExisting = false,
     }: {
       file: File;
-      onProgress?: UploadProgressCallback;
+      onProgress?: Parameters<typeof uploadVideoChunked>[0]["onProgress"];
       signal?: AbortSignal;
-    }) => {
-      let sourceVideoId: string | null = null;
-      try {
-        const presign = await api.presignUpload(token, projectId, file.name, file.type);
-        sourceVideoId = presign.source_video_id;
-        await api.uploadToR2(presign.upload_url, file, onProgress, signal);
-        return await api.confirmUpload(token, projectId, sourceVideoId);
-      } catch (error) {
-        // The presign API creates the row before the browser begins its direct
-        // upload. Remove that incomplete row (and any partial object) when an
-        // upload fails or is cancelled so it cannot masquerade as uploaded.
-        if (sourceVideoId) {
-          try {
-            await api.deleteSourceVideo(token, projectId, sourceVideoId);
-          } catch {
-            // Preserve the original upload error; a later manual delete can
-            // still clean up if the best-effort cleanup request also fails.
-          }
-        }
-        throw error;
-      }
-    },
+      resumeExisting?: boolean;
+    }) =>
+      uploadVideoChunked({
+        token,
+        projectId,
+        file,
+        onProgress,
+        signal,
+        resumeExisting,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects", projectId, "source-videos"] });
       queryClient.invalidateQueries({ queryKey: ["projects", projectId, "jobs"] });

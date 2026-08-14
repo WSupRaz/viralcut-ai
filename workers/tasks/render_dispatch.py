@@ -1,4 +1,3 @@
-import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -16,6 +15,7 @@ from db_models.models.timeline import Timeline
 from workers.celery_app import celery_app
 from workers.config import settings
 from workers.db import get_session_factory
+from workers.ffmpeg import run_ffmpeg
 from workers.storage import download_to_path, upload_from_path
 
 # Re-encode (not stream-copy) every trim: -ss before -i is a fast keyframe
@@ -44,8 +44,17 @@ ENCODE_ARGS = [
 RENDER_WORKER_TIMEOUT_SECONDS = 300.0
 
 
+def _set_job_stage(session_factory, job_id: uuid.UUID, progress_pct: int, stage: str) -> None:
+    with session_factory() as session:
+        job = session.get(Job, uuid.UUID(str(job_id)))
+        if job is not None:
+            job.progress_pct = progress_pct
+            job.stage = stage
+            session.commit()
+
+
 def _trim_clip(input_path: Path, output_path: Path, start: float, end: float) -> None:
-    subprocess.run(
+    run_ffmpeg(
         [
             "ffmpeg", "-y",
             # Global, before -i: constrains decoder threads too, not just
@@ -59,9 +68,7 @@ def _trim_clip(input_path: Path, output_path: Path, start: float, end: float) ->
             *ENCODE_ARGS,
             str(output_path),
         ],
-        capture_output=True,
-        text=True,
-        check=True,
+        label="clip trim",
     )
 
 
@@ -69,16 +76,14 @@ def _concat_clips(clip_paths: list[Path], output_path: Path, concat_list_path: P
     # All clips just went through the same ENCODE_ARGS above, so their codec
     # params match and a stream-copy concat is safe (fast, no quality loss).
     concat_list_path.write_text("".join(f"file '{p}'\n" for p in clip_paths))
-    subprocess.run(
+    run_ffmpeg(
         [
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0", "-i", str(concat_list_path),
             "-c", "copy",
             str(output_path),
         ],
-        capture_output=True,
-        text=True,
-        check=True,
+        label="clip concat",
     )
 
 
@@ -145,6 +150,9 @@ def cut_source_video(self, edit_plan_id: str, job_id: str) -> dict:
         project_id = edit_plan.project_id
 
         job.status = JobStatus.RUNNING
+        job.celery_task_id = self.request.id
+        job.stage = "Cutting source video"
+        job.progress_pct = 10
         session.commit()
 
     try:
@@ -166,6 +174,7 @@ def cut_source_video(self, edit_plan_id: str, job_id: str) -> dict:
         job = session.get(Job, uuid.UUID(job_id))
         job.status = JobStatus.SUCCEEDED
         job.progress_pct = 100
+        job.stage = "Cut ready"
         session.commit()
 
     return {"edit_plan_id": edit_plan_id, "cut_r2_key": cut_key, "clip_count": len(timeline)}
@@ -208,6 +217,9 @@ def render_export(self, export_id: str, job_id: str) -> dict:
         project_id = export.project_id
 
         job.status = JobStatus.RUNNING
+        job.celery_task_id = self.request.id
+        job.stage = "Cutting source video"
+        job.progress_pct = 10
         session.commit()
 
     try:
@@ -218,6 +230,7 @@ def render_export(self, export_id: str, job_id: str) -> dict:
             upload_from_path(str(cut_output_path), cut_key)
 
         final_key = f"renders/{project_id}/{export_id}/final.mp4"
+        _set_job_stage(session_factory, job_id, 40, "Compositing captions and zooms")
         response = httpx.post(
             f"{settings.render_worker_url}/render",
             json={
@@ -247,6 +260,7 @@ def render_export(self, export_id: str, job_id: str) -> dict:
         export.r2_key_output = final_key
         job.status = JobStatus.SUCCEEDED
         job.progress_pct = 100
+        job.stage = "Export ready"
         session.commit()
 
     return {"export_id": export_id, "r2_key_output": final_key}

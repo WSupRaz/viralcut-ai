@@ -10,13 +10,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
   const user = useAuthStore((s) => s.user);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const clearAuth = useAuthStore((s) => s.clearAuth);
 
   useEffect(() => {
-    if (!token) router.replace("/sign-in");
-  }, [token, router]);
+    // Only redirect once rehydration has finished -- otherwise a reload with
+    // a valid persisted session would briefly see token=null and kick the
+    // user to /sign-in, losing the in-flight upload context.
+    if (hasHydrated && !token) router.replace("/sign-in");
+  }, [hasHydrated, token, router]);
 
-  if (!token) return null;
+  if (!hasHydrated || !token) return null;
 
   return (
     <div className="flex min-h-screen flex-col">

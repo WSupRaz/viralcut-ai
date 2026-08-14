@@ -30,6 +30,17 @@ class Settings(BaseSettings):
 
     allowed_origins: list[str] = ["http://localhost:3000"]
 
+    # Hard cap for a single source-video upload. 5 GiB matches the S3
+    # single-PUT ceiling; anything the UI allows must be ≤ this. Override
+    # via MAX_UPLOAD_BYTES in the environment.
+    max_upload_bytes: int = 5 * 1024 * 1024 * 1024
+
+    # Abandoned-upload sweep: a pending (never-completed) upload session
+    # older than this is aborted and removed when a new upload starts in the
+    # same project. Bounds orphaned multipart uploads without needing a
+    # scheduled job.
+    abandoned_upload_ttl_hours: int = 24
+
     # Best-effort "wake up" ping fired at the worker's public URL whenever a
     # task is enqueued -- needed only on free-tier PaaS hosts (e.g. Render)
     # that spin a service down after idle HTTP traffic; the Celery worker's

@@ -9,9 +9,11 @@ from db_models.models.enums import JobStatus, JobType
 class JobRead(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
+    source_video_id: uuid.UUID | None
     type: JobType
     status: JobStatus
     progress_pct: int
+    stage: str | None
     error: str | None
     retry_count: int
     created_at: datetime

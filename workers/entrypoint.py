@@ -43,6 +43,12 @@ if __name__ == "__main__":
             # service restarts from scratch. One process at a time is safe;
             # revisit only after moving off the free tier.
             "--concurrency=1",
+            # Embed the beat scheduler in the same process: a separate beat
+            # container would be another always-on free-tier instance for one
+            # hourly housekeeping task. At this scale the embedded scheduler
+            # (runs the abandoned-upload sweep every hour) is the right
+            # trade; split it out if the schedule ever grows.
+            "-B",
         ],
         check=True,
     )

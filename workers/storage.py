@@ -27,3 +27,17 @@ def upload_from_path(local_path: str, key: str, content_type: str = "video/mp4")
     get_r2_client().upload_file(
         local_path, settings.r2_bucket_name, key, ExtraArgs={"ContentType": content_type}
     )
+
+
+def abort_multipart_upload(key: str, upload_id: str) -> None:
+    """Best-effort abort of an abandoned multipart upload (idempotent)."""
+    try:
+        get_r2_client().abort_multipart_upload(
+            Bucket=settings.r2_bucket_name, Key=key, UploadId=upload_id
+        )
+    except Exception:
+        pass
+
+
+def delete_object(key: str) -> None:
+    get_r2_client().delete_object(Bucket=settings.r2_bucket_name, Key=key)

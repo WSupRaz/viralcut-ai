@@ -8,6 +8,7 @@ celery_app = Celery(
     backend=settings.celery_result_backend,
     include=[
         "workers.tasks.health",
+        "workers.tasks.cleanup",
         "workers.tasks.proxy",
         "workers.tasks.metadata_extraction",
         "workers.tasks.edit_plan",
@@ -25,3 +26,13 @@ celery_app.conf.update(
     result_expires=3600,
     broker_connection_retry_on_startup=True,
 )
+
+celery_app.conf.beat_schedule = {
+    # Abandoned (never-completed) upload sessions older than the TTL are
+    # aborted/removed hourly -- the API-side sweep only fires when a new
+    # upload starts in the same project, which misses abandoned projects.
+    "sweep-abandoned-uploads": {
+        "task": "workers.tasks.cleanup.sweep_abandoned_uploads",
+        "schedule": 3600.0,
+    },
+}

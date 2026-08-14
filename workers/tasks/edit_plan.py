@@ -85,6 +85,9 @@ def generate_edit_plan(self, project_id: str, job_id: str) -> dict:
         instructions = project.instructions
 
         job.status = JobStatus.RUNNING
+        job.celery_task_id = self.request.id
+        job.stage = "Generating edit plan"
+        job.progress_pct = 10
         session.commit()
 
     try:
@@ -92,6 +95,11 @@ def generate_edit_plan(self, project_id: str, job_id: str) -> dict:
         user_prompt = build_user_prompt(source_summaries, instructions)
 
         raw_plan, provider_name = _generate_with_fallback(system_prompt, user_prompt)
+        with session_factory() as session:
+            job = session.get(Job, uuid.UUID(job_id))
+            job.progress_pct = 70
+            job.stage = "Validating edit plan"
+            session.commit()
 
         plan = EditPlan(**raw_plan)
         clamped = validate_and_clamp(plan, source_durations)
@@ -120,6 +128,7 @@ def generate_edit_plan(self, project_id: str, job_id: str) -> dict:
 
         job.status = JobStatus.SUCCEEDED
         job.progress_pct = 100
+        job.stage = "Edit plan ready"
         session.commit()
 
         edit_plan_id = edit_plan_row.id

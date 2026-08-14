@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Integer, Numeric, Text
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +33,22 @@ class SourceVideo(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         default=SourceVideoStatus.UPLOADED,
     )
+    # --- resumable multipart upload session state ---
+    # size_bytes is the *declared* size from the browser at upload start;
+    # the worker/proxy ffprobe is the real gate, but this lets the API
+    # reject wrong sizes without touching storage.
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Non-null while a multipart upload is in progress; cleared on complete.
+    # A row with upload_id set but no active client is an abandoned upload
+    # (see cleanup in source_video_service).
+    upload_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    @property
+    def upload_pending(self) -> bool:
+        """Non-null upload_id == multipart session still open (see service)."""
+        return self.upload_id is not None
 
     project: Mapped["Project"] = relationship(back_populates="source_videos")
     video_metadata: Mapped["VideoMetadata | None"] = relationship(

@@ -4,8 +4,10 @@ import type {
   Job,
   Project,
   SourceVideo,
-  SourceVideoPresignResponse,
   Style,
+  UploadPart,
+  UploadPartUrl,
+  UploadStartResponse,
   User,
 } from "@/types/api";
 
@@ -78,16 +80,49 @@ export const api = {
   getProject: (token: string, projectId: string) =>
     request<Project>(`/api/v1/projects/${projectId}`, { token }),
 
-  presignUpload: (token: string, projectId: string, filename: string, contentType: string) =>
-    request<SourceVideoPresignResponse>(`/api/v1/projects/${projectId}/source-videos/presign-upload`, {
+  /** Begin a resumable multipart upload session; returns chunk geometry. */
+  startUpload: (
+    token: string,
+    projectId: string,
+    data: { filename: string; content_type: string; size_bytes: number }
+  ) =>
+    request<UploadStartResponse>(`/api/v1/projects/${projectId}/source-videos/uploads/start`, {
       method: "POST",
-      body: { filename, content_type: contentType },
+      body: data,
       token,
     }),
 
-  uploadToR2: (
+  /** Parts already on the server for a pending upload (for resume). */
+  getUploadParts: (token: string, projectId: string, sourceVideoId: string) =>
+    request<UploadPart[]>(`/api/v1/projects/${projectId}/source-videos/${sourceVideoId}/uploads/parts`, {
+      token,
+    }),
+
+  /** Freshly-signed PUT URL for one part. */
+  getPartUrl: (token: string, projectId: string, sourceVideoId: string, partNumber: number) =>
+    request<UploadPartUrl>(`/api/v1/projects/${projectId}/source-videos/${sourceVideoId}/uploads/part-url?part_number=${partNumber}`, {
+      token,
+    }),
+
+  /** Verify + assemble all parts server-side, enqueue processing. */
+  completeUpload: (token: string, projectId: string, sourceVideoId: string) =>
+    request<Job>(`/api/v1/projects/${projectId}/source-videos/${sourceVideoId}/uploads/complete`, {
+      method: "POST",
+      token,
+    }),
+
+  /** Re-run processing for a source video (checks storage first). */
+  retrySourceVideo: (token: string, projectId: string, sourceVideoId: string) =>
+    request<Job>(`/api/v1/projects/${projectId}/source-videos/${sourceVideoId}/retry`, {
+      method: "POST",
+      token,
+    }),
+
+  /** PUT a single chunk to a presigned part URL (streams, never loads the
+   *  whole file into memory -- File.slice() blobs are read off disk). */
+  uploadPart: (
     uploadUrl: string,
-    file: File,
+    blob: Blob,
     onProgress?: UploadProgressCallback,
     signal?: AbortSignal
   ) =>
@@ -111,7 +146,6 @@ export const api = {
       signal?.addEventListener("abort", abortUpload, { once: true });
       xhr.open("PUT", uploadUrl);
       xhr.timeout = UPLOAD_TIMEOUT_MS;
-      xhr.setRequestHeader("Content-Type", file.type);
 
       xhr.upload.onprogress = (event) => {
         if (event.lengthComputable) {
@@ -130,13 +164,7 @@ export const api = {
       xhr.ontimeout = () =>
         finish(() => reject(new ApiError(0, "Upload timed out. Check your connection and try again.")));
       xhr.onabort = () => finish(() => reject(new DOMException("Upload cancelled", "AbortError")));
-      xhr.send(file);
-    }),
-
-  confirmUpload: (token: string, projectId: string, sourceVideoId: string) =>
-    request<Job>(`/api/v1/projects/${projectId}/source-videos/${sourceVideoId}/confirm-upload`, {
-      method: "POST",
-      token,
+      xhr.send(blob);
     }),
 
   listSourceVideos: (token: string, projectId: string) =>

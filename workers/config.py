@@ -28,6 +28,16 @@ class Settings(BaseSettings):
 
     render_worker_url: str = "http://render-worker:3001"
 
+    # Abandoned-upload sweep (workers/tasks/cleanup.py): pending
+    # (never-completed) upload sessions older than this many hours are
+    # aborted and removed. Mirrors the API-side value (config.py).
+    abandoned_upload_ttl_hours: int = 24
+
+    # PySceneDetect is skipped for sources longer than this (seconds) -- its
+    # Python frame-by-frame loop makes very long videos slower than the
+    # transcode itself. SCENE_DETECT_MAX_DURATION_SECONDS.
+    scene_detect_max_duration_seconds: float = 1800.0
+
     @property
     def sync_database_url(self) -> str:
         """DATABASE_URL is asyncpg-flavored for the FastAPI service; workers

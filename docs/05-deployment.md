@@ -84,6 +84,16 @@ B2's S3-compatible endpoint is the same for every bucket in your account
 (`R2_ENDPOINT_URL` etc.) is provider-agnostic -- B2 is a drop-in
 S3-compatible swap for R2, same variable names throughout.
 
+**CORS is mandatory.** The browser PUTs uploaded parts *directly* to B2 via
+presigned URLs (cross-origin, from your Vercel domain to B2). Without a CORS
+policy on the bucket, the browser aborts every part PUT before it starts.
+Bucket **CORS Rules** -> **New rule**: `AllowedOrigins` = your Vercel domain
+(`*` works for dev but is wider than needed), `AllowedMethods` = `GET, PUT,
+POST, DELETE, HEAD`, `AllowedHeaders` = `*`, `ExposeHeaders` = `ETag`,
+`MaxAgeSeconds` = `3600`. (Local dev's MinIO gets the equivalent via
+`infra/docker-compose.dev.yml`'s `minio-init` step -- prod buckets must be
+configured in the provider console; there is no app code for it.)
+
 ## Step 3 -- Neon (Postgres)
 
 1. neon.tech -> sign up (no card required).
@@ -171,9 +181,24 @@ Railway's do -- use each service's public `*.onrender.com` URL for
 `RENDER_WORKER_URL` and `WORKER_WAKE_URL`. That's also exactly what lets
 those HTTP calls wake a sleeping service back up.
 
-`api` additionally needs `JWT_EXPIRES_IN_MINUTES`, `R2_BUCKET_NAME`, etc. --
-same var names as `.env.example`, just real values instead of the MinIO dev
-defaults.
+`api` additionally needs `JWT_EXPIRES_IN_MINUTES`, `R2_BUCKET_NAME`, and
+optionally `MAX_UPLOAD_BYTES` (default 5 GiB) / `ABANDONED_UPLOAD_TTL_HOURS`
+(default 24) -- same var names as `.env.example`, just real values instead of
+the MinIO dev defaults.
+
+**Worker disk, not RAM, is the second constraint.** A 1.2 GB upload needs
+>1.2 GB of free space in the worker's temp dir (raw source + 480p proxy
+coexist while transcoding). Render's free tier gives instances a small
+ephemeral disk; if proxy generation fails with a disk-full style error, set
+`TMPDIR` on the worker service to a path on a larger/persistent volume
+(`workers/ffmpeg.py` and the pipeline stream everything -- memory is bounded
+by the `-threads 1` decode caps already in place, disk is the real floor).
+
+## Step 5b -- Run the new upload migration
+
+The resumable-upload schema (new columns on `source_videos`/`jobs`) ships as
+alembic revision `b3f2a1c9d4e0`. Same manual step as Step 6 below; do it
+once, before first deploy.
 
 ## Step 6 -- Run migrations
 

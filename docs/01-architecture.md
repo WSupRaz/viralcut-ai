@@ -66,8 +66,13 @@ flowchart TB
 
 ## Pipeline (matches spec's 7 steps, with scope trimmed per ADR-0004)
 
-1. **Upload** — client requests a presigned R2 upload URL from FastAPI, uploads
-   directly to R2 (never proxied through the API process).
+1. **Upload** — client opens a resumable S3-multipart session via FastAPI
+   (`uploads/start`), PUTs the file to object storage in 8 MiB presigned
+   parts directly from the browser (never proxied through the API process,
+   never loaded into browser/API RAM), then `uploads/complete` verifies part
+   sizes server-side, assembles the object, and enqueues processing. Parts
+   are individually retried with backoff and the session survives a page
+   refresh / network drop (resume from the last uploaded part, not zero).
 2. **Proxy generation** — Celery task transcodes a low-res (480p) proxy for fast
    preview/editing in the timeline UI.
 3. **Metadata extraction** — transcript (word timestamps + diarization) via
