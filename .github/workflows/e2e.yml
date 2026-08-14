@@ -1,0 +1,83 @@
+name: E2E
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare env
+        run: cp .env.example .env
+
+      - name: Boot the stack (postgres, redis, minio, api, worker)
+        run: |
+          docker compose -f infra/docker-compose.dev.yml up -d \
+            postgres redis minio minio-init api worker render-worker
+
+      - name: Wait for API health (api auto-migrates on boot)
+        run: |
+          for i in $(seq 1 120); do
+            if curl -sf http://localhost:8000/healthz >/dev/null 2>&1; then
+              echo "api healthy after ${i} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "api never became healthy" >&2
+          docker compose -f infra/docker-compose.dev.yml logs api --tail 40 >&2 || true
+          exit 1
+
+      - name: Generate test videos (worker container has ffmpeg)
+        run: bash tests/e2e/scripts/make-test-video.sh
+
+      - name: Validation suite
+        run: |
+          pip install --quiet httpx
+          python tests/e2e/api/e2e_validation.py --api http://localhost:8000
+
+      - name: API upload suite (real clip through proxy job)
+        run: python tests/e2e/api/e2e_upload.py tests/e2e/artifacts/ci-real.mp4 --api http://localhost:8000
+
+      - name: Build and serve the web app
+        run: |
+          cd apps/web
+          printf 'NEXT_PUBLIC_API_URL=http://localhost:8000\n' > .env.local
+          npm ci --no-audit --no-fund
+          npm run build
+          nohup npx next start -p 3000 > /tmp/web.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/sign-up >/dev/null 2>&1; then
+              echo "web serving after ${i} attempts"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "web never became healthy" >&2
+          tail -40 /tmp/web.log >&2 || true
+          exit 1
+
+      - name: Client E2E (real upload client vs live stack)
+        run: cd apps/web && npx tsx ../../tests/e2e/client/upload-client.e2e.mts
+
+      - name: Browser E2E (upload -> refresh -> resume)
+        run: |
+          cd tests/e2e/browser
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          PW_CHANNEL=chromium E2E_UPLOAD_MBPS=10 \
+            node upload-resume.mjs ../artifacts/ci-upload-100mb.mp4
+
+      - name: Upload logs on failure
+        if: failure()
+        run: |
+          docker compose -f infra/docker-compose.dev.yml logs --tail 60 api worker > /tmp/stack.log 2>&1 || true
+          cat /tmp/web.log 2>/dev/null || true
+          echo "--- stack logs ---"
+          tail -80 /tmp/stack.log 2>/dev/null || true

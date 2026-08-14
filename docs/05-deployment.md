@@ -94,6 +94,28 @@ POST, DELETE, HEAD`, `AllowedHeaders` = `*`, `ExposeHeaders` = `ETag`,
 `infra/docker-compose.dev.yml`'s `minio-init` step -- prod buckets must be
 configured in the provider console; there is no app code for it.)
 
+**Lifecycle rule (abandoned uploads).** A browser that dies mid-upload leaves
+an open multipart session (and its uploaded parts) on the bucket. The app
+sweeps these itself (a Celery beat task every hour, plus on-start), but the
+provider should back that up so orphaned sessions can't accrue even if the
+worker is down:
+
+```bash
+# R2 (or B2 via its S3-compatible endpoint) -- abort incomplete multipart
+# uploads 1 day after initiation (matches ABANDONED_UPLOAD_TTL_HOURS=24):
+R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... \
+R2_BUCKET_NAME=<your bucket> R2_ENDPOINT_URL=https://<s3-endpoint> \
+  python infra/scripts/configure_bucket_lifecycle.py
+```
+
+R2 also expires incomplete multipart uploads by default after 7 days, so this
+just tightens the window; B2 needs the rule. Alternatively use the provider
+console: Cloudflare R2 **Bucket -> Settings -> Lifecycle rules**, or B2
+**Bucket -> Lifecycle Rules** (action: abort incomplete multipart uploads,
+1 day). Local dev's MinIO may reject the S3 lifecycle API on some builds -- a
+known MinIO quirk; dev cleanup is covered by the in-app sweeps, so ignore the
+error there.
+
 ## Step 3 -- Neon (Postgres)
 
 1. neon.tech -> sign up (no card required).
