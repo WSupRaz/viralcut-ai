@@ -118,22 +118,27 @@ def main() -> None:
             print(f"COMPLETE FAILED: HTTP {r.status_code} {r.text}")
             sys.exit(1)
         job = r.json()
-        print(f"complete -> job {job['id']} type={job['type']}")
+        job_id = job["id"]
+        print(f"complete -> job {job_id} type={job['type']}")
 
+        # Poll the proxy job specifically (the one this upload created), not
+        # jobs[0]: the jobs list has no ORDER BY, so its first row is not
+        # deterministic across environments. Later pipeline jobs (metadata,
+        # edit-plan) need real AI-provider keys that CI doesn't have -- this
+        # suite's scope is upload -> proxy transcode.
         deadline = time.time() + 1800
         last = ""
         while time.time() < deadline:
-            r = client.get(f"/api/v1/projects/{project_id}/jobs", headers=headers)
+            r = client.get(f"/api/v1/projects/{project_id}/jobs/{job_id}", headers=headers)
             r.raise_for_status()
-            jobs = r.json()
-            line = "; ".join(f"{j['type']}={j['status']}({j.get('stage') or ''}{j.get('progress_pct', 0)})"
-                             for j in jobs[:3])
+            cur = r.json()
+            line = f"{cur['type']}={cur['status']}({cur.get('stage') or ''}{cur.get('progress_pct', 0)})"
             if line != last:
-                print(f"  jobs: {line}")
+                print(f"  job: {line}")
                 last = line
-            if jobs and jobs[0]["status"] in ("succeeded", "failed"):
-                if jobs[0]["status"] == "failed":
-                    print(f"JOB FAILED: {jobs[0].get('error')}")
+            if cur["status"] in ("succeeded", "failed"):
+                if cur["status"] == "failed":
+                    print(f"JOB FAILED: {cur.get('error')}")
                     sys.exit(1)
                 break
             time.sleep(5)
