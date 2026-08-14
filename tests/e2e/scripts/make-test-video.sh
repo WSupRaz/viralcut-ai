@@ -9,7 +9,8 @@
 #                         browser resume test, which only exercises upload
 #                         mechanics, not processing
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+# this file lives at tests/e2e/scripts/ -> repo root is three levels up
+cd "$(dirname "$0")/../../.."
 
 mkdir -p tests/e2e/artifacts
 COMPOSE=(docker compose -f infra/docker-compose.dev.yml)

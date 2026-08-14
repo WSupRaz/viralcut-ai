@@ -76,7 +76,40 @@ jobs:
           exit 1
 
       - name: Generate test videos (worker container has ffmpeg)
-        run: bash tests/e2e/scripts/make-test-video.sh
+        id: videos
+        run: |
+          set +e
+          bash tests/e2e/scripts/make-test-video.sh > /tmp/video.log 2>&1
+          RC=$?
+          echo "RC=$RC" >> /tmp/video.log
+          docker compose -f infra/docker-compose.dev.yml ps worker >> /tmp/video.log 2>&1
+          docker compose -f infra/docker-compose.dev.yml logs --tail 30 worker >> /tmp/video.log 2>&1
+          cat /tmp/video.log
+          exit $RC
+
+      - name: Publish video diagnostics
+        if: failure() && steps.videos.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          log = open('/tmp/video.log', errors='replace').read()[-4000:]
+          body = json.dumps({
+              "name": "video-diagnostics",
+              "head_sha": "${{ github.sha }}",
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {"title": "test-video generation failed", "summary": "```\n" + log + "\n```"},
+          }).encode()
+          req = urllib.request.Request(
+              "https://api.github.com/repos/${{ github.repository }}/check-runs",
+              data=body, method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "Content-Type": "application/json"})
+          print(urllib.request.urlopen(req).status)
+          PY
 
       - name: Validation suite
         run: |
