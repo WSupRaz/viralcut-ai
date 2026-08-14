@@ -117,36 +117,163 @@ jobs:
           python tests/e2e/api/e2e_validation.py --api http://localhost:8000
 
       - name: API upload suite (real clip through proxy job)
-        run: python tests/e2e/api/e2e_upload.py tests/e2e/artifacts/ci-real.mp4 --api http://localhost:8000
+        id: apisuite
+        run: |
+          set +e
+          python tests/e2e/api/e2e_upload.py tests/e2e/artifacts/ci-real.mp4 --api http://localhost:8000 > /tmp/apisuite.log 2>&1
+          RC=$?
+          echo "RC=$RC" >> /tmp/apisuite.log
+          docker compose -f infra/docker-compose.dev.yml logs --tail 40 worker >> /tmp/apisuite.log 2>&1
+          cat /tmp/apisuite.log
+          exit $RC
+
+      - name: Publish API-suite diagnostics
+        if: failure() && steps.apisuite.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          log = open('/tmp/apisuite.log', errors='replace').read()[-4000:]
+          body = json.dumps({
+              "name": "apisuite-diagnostics",
+              "head_sha": "${{ github.sha }}",
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {"title": "api upload suite failed", "summary": "```\n" + log + "\n```"},
+          }).encode()
+          req = urllib.request.Request(
+              "https://api.github.com/repos/${{ github.repository }}/check-runs",
+              data=body, method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "Content-Type": "application/json"})
+          print(urllib.request.urlopen(req).status)
+          PY
 
       - name: Build and serve the web app
+        id: webapp
         run: |
-          cd apps/web
-          printf 'NEXT_PUBLIC_API_URL=http://localhost:8000\n' > .env.local
-          npm ci --no-audit --no-fund
-          npm run build
-          nohup npx next start -p 3000 > /tmp/web.log 2>&1 &
-          for i in $(seq 1 60); do
-            if curl -sf http://localhost:3000/sign-up >/dev/null 2>&1; then
-              echo "web serving after ${i} attempts"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "web never became healthy" >&2
-          tail -40 /tmp/web.log >&2 || true
-          exit 1
+          set +e
+          (
+            cd apps/web
+            printf 'NEXT_PUBLIC_API_URL=http://localhost:8000\n' > .env.local
+            npm ci --no-audit --no-fund
+            npm run build
+          ) > /tmp/webbuild.log 2>&1
+          RC=$?
+          if [ $RC -eq 0 ]; then
+            cd apps/web
+            nohup npx next start -p 3000 > /tmp/web.log 2>&1 &
+            for i in $(seq 1 60); do
+              if curl -sf http://localhost:3000/sign-up >/dev/null 2>&1; then
+                echo "web serving after ${i} attempts"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "web never became healthy" >&2
+            RC=1
+          fi
+          cat /tmp/webbuild.log
+          tail -40 /tmp/web.log 2>/dev/null || true
+          exit $RC
+
+      - name: Publish web-build diagnostics
+        if: failure() && steps.webapp.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          log = (open('/tmp/webbuild.log', errors='replace').read() + open('/tmp/web.log', errors='replace').read())[-4000:]
+          body = json.dumps({
+              "name": "webapp-diagnostics",
+              "head_sha": "${{ github.sha }}",
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {"title": "web build/start failed", "summary": "```\n" + log + "\n```"},
+          }).encode()
+          req = urllib.request.Request(
+              "https://api.github.com/repos/${{ github.repository }}/check-runs",
+              data=body, method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "Content-Type": "application/json"})
+          print(urllib.request.urlopen(req).status)
+          PY
 
       - name: Client E2E (real upload client vs live stack)
-        run: cd apps/web && npx tsx ../../tests/e2e/client/upload-client.e2e.mts
+        id: client
+        run: |
+          set +e
+          cd apps/web && npx tsx ../../tests/e2e/client/upload-client.e2e.mts > /tmp/client.log 2>&1
+          RC=$?
+          cat /tmp/client.log
+          exit $RC
+
+      - name: Publish client diagnostics
+        if: failure() && steps.client.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          log = open('/tmp/client.log', errors='replace').read()[-4000:]
+          body = json.dumps({
+              "name": "client-diagnostics",
+              "head_sha": "${{ github.sha }}",
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {"title": "client e2e failed", "summary": "```\n" + log + "\n```"},
+          }).encode()
+          req = urllib.request.Request(
+              "https://api.github.com/repos/${{ github.repository }}/check-runs",
+              data=body, method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "Content-Type": "application/json"})
+          print(urllib.request.urlopen(req).status)
+          PY
 
       - name: Browser E2E (upload -> refresh -> resume)
+        id: browser
         run: |
-          cd tests/e2e/browser
-          npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
-          PW_CHANNEL=chromium E2E_UPLOAD_MBPS=10 \
-            node upload-resume.mjs ../artifacts/ci-upload-100mb.mp4
+          set +e
+          (
+            cd tests/e2e/browser
+            npm ci --no-audit --no-fund
+            npx playwright install --with-deps chromium
+            PW_CHANNEL=chromium E2E_UPLOAD_MBPS=10 \
+              node upload-resume.mjs ../artifacts/ci-upload-100mb.mp4
+          ) > /tmp/browser.log 2>&1
+          RC=$?
+          cat /tmp/browser.log
+          exit $RC
+
+      - name: Publish browser diagnostics
+        if: failure() && steps.browser.outcome == 'failure'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          log = open('/tmp/browser.log', errors='replace').read()[-4000:]
+          body = json.dumps({
+              "name": "browser-diagnostics",
+              "head_sha": "${{ github.sha }}",
+              "status": "completed",
+              "conclusion": "neutral",
+              "output": {"title": "browser e2e failed", "summary": "```\n" + log + "\n```"},
+          }).encode()
+          req = urllib.request.Request(
+              "https://api.github.com/repos/${{ github.repository }}/check-runs",
+              data=body, method="POST",
+              headers={"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
+                       "Accept": "application/vnd.github+json",
+                       "Content-Type": "application/json"})
+          print(urllib.request.urlopen(req).status)
+          PY
 
       - name: Upload logs on failure
         if: failure()
