@@ -74,6 +74,13 @@ try {
 
   // ---------- create project ----------
   await page.waitForLoadState("networkidle");
+  // The form is behind a "New project" button on the redesigned dashboard;
+  // click it when present (older builds show the form inline).
+  const newProjectBtn = page.getByRole("button", { name: "New project" });
+  if (await newProjectBtn.isVisible().catch(() => false)) {
+    await newProjectBtn.click();
+    await page.waitForTimeout(300);
+  }
   await page.fill("#title", "Browser resumable upload E2E");
   await page.getByRole("button", { name: "Create project" }).click();
   await waitFor(() => /\/dashboard\/projects\/[0-9a-f-]+$/.test(page.url()));

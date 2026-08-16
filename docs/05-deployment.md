@@ -86,13 +86,31 @@ S3-compatible swap for R2, same variable names throughout.
 
 **CORS is mandatory.** The browser PUTs uploaded parts *directly* to B2 via
 presigned URLs (cross-origin, from your Vercel domain to B2). Without a CORS
-policy on the bucket, the browser aborts every part PUT before it starts.
-Bucket **CORS Rules** -> **New rule**: `AllowedOrigins` = your Vercel domain
-(`*` works for dev but is wider than needed), `AllowedMethods` = `GET, PUT,
-POST, DELETE, HEAD`, `AllowedHeaders` = `*`, `ExposeHeaders` = `ETag`,
-`MaxAgeSeconds` = `3600`. (Local dev's MinIO gets the equivalent via
-`infra/docker-compose.dev.yml`'s `minio-init` step -- prod buckets must be
-configured in the provider console; there is no app code for it.)
+policy on the bucket, the browser aborts every part PUT before it starts
+(the upload sits at 0% and eventually reports "Upload paused due to network
+issues"; B2 answers the preflight with `403 AccessDenied: This CORS request
+is not allowed`). There's a one-command script -- same S3 PutBucketCors API
+the provider console uses, so it works for B2, R2, MinIO, and AWS S3:
+
+```bash
+# B2: endpoint is your account's S3-compatible endpoint, e.g.
+# https://s3.us-east-005.backblazeb2.com (NOT the console URL). Keys are the
+# application-keyID/applicationKey from Step 2. --origin repeatable.
+R2_ENDPOINT_URL=https://<s3-endpoint> \
+R2_ACCESS_KEY_ID=<keyID> R2_SECRET_ACCESS_KEY=<applicationKey> \
+R2_BUCKET_NAME=<bucket> \
+  python infra/scripts/configure_bucket_cors.py \
+  --origin https://<your-vercel-domain>
+
+# Or the provider console: Bucket -> CORS Rules -> New rule:
+#   AllowedOrigins = your Vercel domain (* works for dev but is wider)
+#   AllowedMethods = GET, PUT, POST, DELETE, HEAD
+#   AllowedHeaders = * | ExposeHeaders = ETag | MaxAgeSeconds = 3600
+```
+
+(Local dev's MinIO gets the equivalent via `infra/docker-compose.dev.yml`'s
+`minio-init` step -- MinIO's own S3 API rejects `PutBucketCors` on some
+builds, a known dev quirk; prod B2/R2 implement it.)
 
 **Lifecycle rule (abandoned uploads).** A browser that dies mid-upload leaves
 an open multipart session (and its uploaded parts) on the bucket. The app
