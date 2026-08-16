@@ -4,6 +4,15 @@
 
 export type PlanTier = "free" | "creator" | "pro" | "business";
 
+export interface PlanLimits {
+  tier: PlanTier;
+  max_projects: number;
+  max_clips_per_project: number;
+  max_upload_bytes: number;
+  export_qualities: string[];
+  max_exports_per_project: number;
+}
+
 export interface User {
   id: string;
   email: string;

@@ -1,9 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, get_owned_project
+from app.api.deps import get_current_user, get_db, get_owned_project
+from app.core.abuse import UPLOAD_START_LIMITER, RateLimitExceeded, client_ip, raise_rate_limited
 from app.schemas.job import JobRead
 from app.schemas.source_video import (
     SourceVideoRead,
@@ -13,6 +14,7 @@ from app.schemas.source_video import (
     SourceVideoUploadStartResponse,
 )
 from app.services.source_video_service import (
+    ClipLimitError,
     FileTooLargeError,
     NotAVideoError,
     ObjectMissingError,
@@ -30,6 +32,7 @@ from app.services.source_video_service import (
     start_source_video_upload,
 )
 from db_models.models.project import Project
+from db_models.models.user import User
 
 router = APIRouter(prefix="/projects/{project_id}/source-videos", tags=["source-videos"])
 
@@ -41,21 +44,30 @@ router = APIRouter(prefix="/projects/{project_id}/source-videos", tags=["source-
 )
 async def start_upload(
     payload: SourceVideoUploadStartRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     project: Project = Depends(get_owned_project),
+    current_user: User = Depends(get_current_user),
 ) -> SourceVideoUploadStartResponse:
     """Begin a resumable multipart upload for a new source video. The browser
     then PUTs parts to /part-url?part_number=N URLs and finishes with
     /uploads/complete. Returns chunk geometry (part_size/part_count) so the
     client never needs to know storage internals."""
     try:
-        return await start_source_video_upload(db, project_id=project.id, data=payload)
+        UPLOAD_START_LIMITER.check(f"upload-start:{client_ip(request)}")
+    except RateLimitExceeded:
+        raise_rate_limited()
+
+    try:
+        return await start_source_video_upload(
+            db, project_id=project.id, data=payload, plan=current_user.plan
+        )
     except UnsupportedVideoTypeError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported content type: {exc}. Allowed: mp4, mov, m4v.",
         ) from exc
-    except FileTooLargeError as exc:
+    except (FileTooLargeError, ClipLimitError) as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
         ) from exc

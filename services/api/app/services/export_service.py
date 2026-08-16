@@ -1,14 +1,15 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_client import send_task
+from app.core.plan_limits import PlanLimits, limits_for
 from app.schemas.export import ExportRead
 from app.services.job_service import create_job
 from app.services.storage import generate_presigned_get_url
 from db_models.models.edit_plan import EditPlan
-from db_models.models.enums import AspectRatio, ExportQuality, JobType
+from db_models.models.enums import AspectRatio, ExportQuality, JobType, PlanTier
 from db_models.models.export import Export
 from db_models.models.job import Job
 from db_models.models.timeline import Timeline
@@ -24,6 +25,24 @@ class UnsupportedAspectRatioError(Exception):
         super().__init__(f"aspect ratio {aspect_ratio} is not supported in Phase 1")
 
 
+class ExportQualityLimitError(Exception):
+    def __init__(self, quality: ExportQuality, plan: PlanTier) -> None:
+        self.quality = quality
+        self.plan = plan
+        super().__init__(
+            f"{quality} exports are not included in the {plan.value} plan."
+        )
+
+
+class ExportCountLimitError(Exception):
+    def __init__(self, limit: int, plan: PlanTier) -> None:
+        self.limit = limit
+        self.plan = plan
+        super().__init__(
+            f"Your {plan.value} plan allows {limit} export(s) per project."
+        )
+
+
 async def create_export(
     db: AsyncSession,
     *,
@@ -31,6 +50,7 @@ async def create_export(
     edit_plan_id: uuid.UUID,
     aspect_ratio: AspectRatio,
     quality: ExportQuality,
+    plan: PlanTier,
 ) -> Export:
     """Materializes a Timeline row from the chosen edit plan (Phase 1's
     timeline is view-only -- no drag-and-drop editing yet, so this is a 1:1
@@ -44,6 +64,16 @@ async def create_export(
     """
     if aspect_ratio != AspectRatio.VERTICAL:
         raise UnsupportedAspectRatioError(aspect_ratio.value)
+
+    plan_limits: PlanLimits = limits_for(plan)
+    if quality.value not in plan_limits.export_qualities:
+        raise ExportQualityLimitError(quality, plan)
+
+    export_count = await db.execute(
+        select(func.count()).select_from(Export).where(Export.project_id == project_id)
+    )
+    if export_count.scalar_one() >= plan_limits.max_exports_per_project:
+        raise ExportCountLimitError(plan_limits.max_exports_per_project, plan)
 
     result = await db.execute(
         select(EditPlan).where(EditPlan.id == edit_plan_id, EditPlan.project_id == project_id)

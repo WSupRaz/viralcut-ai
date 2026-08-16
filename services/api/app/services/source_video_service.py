@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_client import send_task
 from app.core.config import settings
+from app.core.plan_limits import PlanLimits, limits_for
 from app.schemas.source_video import (
     SourceVideoUploadStartRequest,
     SourceVideoUploadStartResponse,
@@ -26,7 +27,7 @@ from app.services.storage import (
     list_parts,
     object_size,
 )
-from db_models.models.enums import JobType
+from db_models.models.enums import JobType, PlanTier
 from db_models.models.job import Job
 from db_models.models.source_video import SourceVideo
 
@@ -36,10 +37,21 @@ class UnsupportedVideoTypeError(Exception):
 
 
 class FileTooLargeError(Exception):
-    def __init__(self, size_bytes: int) -> None:
+    def __init__(self, size_bytes: int, cap: int | None = None, plan: PlanTier | None = None) -> None:
         self.size_bytes = size_bytes
+        cap = cap or settings.max_upload_bytes
         super().__init__(
-            f"File is {size_bytes} bytes; the upload limit is {settings.max_upload_bytes} bytes"
+            f"File is {size_bytes} bytes; your plan allows up to {cap} bytes per file"
+        )
+
+
+class ClipLimitError(Exception):
+    def __init__(self, limit: int, plan: PlanTier) -> None:
+        self.limit = limit
+        self.plan = plan
+        super().__init__(
+            f"Your {plan.value} plan allows {limit} clip(s) per project. "
+            "Remove one or upgrade to upload more."
         )
 
 
@@ -90,7 +102,7 @@ async def _cleanup_abandoned_uploads(db: AsyncSession, *, project_id: uuid.UUID)
 
 
 async def start_source_video_upload(
-    db: AsyncSession, *, project_id: uuid.UUID, data: SourceVideoUploadStartRequest
+    db: AsyncSession, *, project_id: uuid.UUID, data: SourceVideoUploadStartRequest, plan: PlanTier
 ) -> SourceVideoUploadStartResponse:
     """Begin a resumable multipart upload. Creates the SourceVideo row (in
     `uploaded` status) and the server-side multipart session; the browser
@@ -99,8 +111,18 @@ async def start_source_video_upload(
     for the already-uploaded parts (list_parts) and re-uploading the rest."""
     if data.content_type not in ALLOWED_VIDEO_CONTENT_TYPES:
         raise UnsupportedVideoTypeError(data.content_type)
-    if data.size_bytes > settings.max_upload_bytes:
-        raise FileTooLargeError(data.size_bytes)
+
+    # Effective cap = min(global hard cap, what the user's plan allows).
+    plan_limits: PlanLimits = limits_for(plan)
+    effective_cap = min(settings.max_upload_bytes, plan_limits.max_upload_bytes)
+    if data.size_bytes > effective_cap:
+        raise FileTooLargeError(data.size_bytes, cap=effective_cap, plan=plan)
+
+    clip_count = await db.execute(
+        select(func.count()).select_from(SourceVideo).where(SourceVideo.project_id == project_id)
+    )
+    if clip_count.scalar_one() >= plan_limits.max_clips_per_project:
+        raise ClipLimitError(plan_limits.max_clips_per_project, plan)
 
     await _cleanup_abandoned_uploads(db, project_id=project_id)
 

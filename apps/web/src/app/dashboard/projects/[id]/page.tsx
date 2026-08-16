@@ -27,6 +27,7 @@ import {
   useEditPlans,
   useExports,
   useJobs,
+  useMyPlan,
   useProject,
   useRetrySourceVideo,
   useSourceVideos,
@@ -36,7 +37,6 @@ import {
 import type { ExportQuality, Job, JobStatus, SourceVideoStatus } from "@/types/api";
 
 const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/x-m4v"];
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 
 const STATUS_VARIANT: Record<SourceVideoStatus, "secondary" | "default" | "destructive" | "outline"> = {
   uploaded: "secondary",
@@ -66,19 +66,19 @@ const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   retrying: "Retrying...",
   succeeded: "Ready",
   failed: "Failed",
-};
+};  const JOB_TYPE_LABEL: Record<string, string> = {
+    proxy: "Proxy",
+    metadata_extraction: "Metadata",
+    edit_plan: "Edit plan",
+    render: "Render",
+  };
 
-const JOB_TYPE_LABEL: Record<string, string> = {
-  proxy: "Proxy",
-  metadata_extraction: "Metadata",
-  edit_plan: "Edit plan",
-  render: "Render",
-};
+  const QUALITY_ITEMS: { value: ExportQuality; label: string }[] = [
+    { value: "720p", label: "720p" },
+    { value: "1080p", label: "1080p (recommended)" },
+    { value: "4k", label: "4K" },
+  ];
 
-const QUALITY_ITEMS: { value: ExportQuality; label: string }[] = [
-  { value: "720p", label: "720p" },
-  { value: "1080p", label: "1080p (recommended)" },
-];
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -87,6 +87,10 @@ export default function ProjectDetailPage() {
   const { data: jobs } = useJobs(id);
   const { data: editPlans } = useEditPlans(id);
   const { data: exports } = useExports(id);
+  const { data: myPlan } = useMyPlan();
+  const maxUploadBytes = myPlan?.limits.max_upload_bytes ?? 5 * 1024 * 1024 * 1024;
+  const maxClips = myPlan?.limits.max_clips_per_project;
+  const allowedQualities = myPlan?.limits.export_qualities ?? ["720p", "1080p"];
   const uploadVideo = useUploadSourceVideo(id);
   const deleteVideo = useDeleteSourceVideo(id);
   const retryVideo = useRetrySourceVideo(id);
@@ -116,6 +120,8 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     const session = loadUploadSession(id);
     if (!session || !token) return;
+    // Intentional: surface a stored upload session exactly once on mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPausedSession(session);
     let cancelled = false;
     apiClient
@@ -134,7 +140,6 @@ export default function ProjectDetailPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, token]);
 
   async function onDiscardPaused() {
@@ -246,10 +251,17 @@ export default function ProjectDetailPage() {
       return;
     }
 
-    const tooLarge = files.filter((file) => file.size > MAX_UPLOAD_BYTES);
+    const tooLarge = files.filter((file) => file.size > maxUploadBytes);
     if (tooLarge.length > 0) {
       setError(
-        `${tooLarge.map((file) => file.name).join(", ")} is larger than the 5 GB upload limit. Split the file or choose a smaller export.`
+        `${tooLarge.map((file) => file.name).join(", ")} is larger than your plan's upload limit (${formatBytes(maxUploadBytes)}). Split the file or upgrade for a higher limit.`
+      );
+      return;
+    }
+
+    if (maxClips !== undefined && sourceVideos && sourceVideos.length >= maxClips) {
+      setError(
+        `Your plan allows ${maxClips} clip(s) per project. Remove one or upgrade to upload more.`
       );
       return;
     }
@@ -329,7 +341,7 @@ export default function ProjectDetailPage() {
           <CardTitle>Source videos</CardTitle>
           <CardDescription>
             Upload mp4, mov, or m4v files up to 5 GB each. Uploads are chunked and resumable -- a
-            dropped connection or a refresh won't force you to start a 1.2 GB file over from zero.
+            dropped connection or a refresh won&apos;t force you to start a 1.2 GB file over from zero.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -563,7 +575,7 @@ export default function ProjectDetailPage() {
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-3">
               <Select
-                items={QUALITY_ITEMS}
+                items={QUALITY_ITEMS.filter((item) => allowedQualities.includes(item.value))}
                 value={quality}
                 onValueChange={(value) => value && setQuality(value as ExportQuality)}
               >
@@ -571,7 +583,7 @@ export default function ProjectDetailPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {QUALITY_ITEMS.map((item) => (
+                  {QUALITY_ITEMS.filter((item) => allowedQualities.includes(item.value)).map((item) => (
                     <SelectItem key={item.value} value={item.value}>
                       {item.label}
                     </SelectItem>

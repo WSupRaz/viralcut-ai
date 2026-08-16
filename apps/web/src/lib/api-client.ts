@@ -2,6 +2,7 @@ import type {
   EditPlan,
   Export,
   Job,
+  PlanLimits,
   Project,
   SourceVideo,
   Style,
@@ -67,6 +68,12 @@ export const api = {
     }),
 
   me: (token: string) => request<User>("/api/v1/auth/me", { token }),
+
+  /** The caller's current plan tier + limits (drives UI gating). */
+  myPlan: (token: string) => request<{ tier: string; limits: PlanLimits }>("/api/v1/plans/me", { token }),
+
+  /** Every plan tier and its limits (public pricing data). */
+  listPlans: () => request<{ plans: { tier: string; limits: PlanLimits }[] }>("/api/v1/plans"),
 
   listStyles: (token: string) => request<Style[]>("/api/v1/styles", { token }),
 

@@ -14,8 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ViralCut AI",
-  description: "AI-powered automatic video editing.",
+  title: {
+    default: "ViralCut AI — Turn raw footage into captioned vertical shorts",
+    template: "%s · ViralCut AI",
+  },
+  description:
+    "Upload raw footage and get a captioned, cut, ready-to-post vertical short. Scene detection, silence trimming, AI edit plans, and frame-accurate captions — automatically.",
 };
 
 export default function RootLayout({

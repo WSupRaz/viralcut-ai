@@ -1,0 +1,46 @@
+name: Keep-alive
+
+# Render's free-tier services spin down after ~15 minutes without incoming
+# HTTP traffic and take 50+ seconds to cold-start on the next request -- a
+# death sentence for a real user's first visit. This cron fires an HTTP GET
+# at every prod endpoint every 10 minutes, which is enough traffic to keep
+# the instances warm at zero cost (one tiny job; the whole run takes ~10s).
+#
+# Add any new public endpoints (worker health URLs, the frontend) to the
+# PING_URLS repo variable -- whitespace-separated, https URLs only.
+#   Settings -> Secrets and variables -> Actions -> Variables -> PING_URLS
+
+on:
+  schedule:
+    # every 10 minutes, at :00 :10 :20 ...
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the stack is alive
+        env:
+          # Defaults cover the deployed API + frontend. Add the Celery and
+          # Remotion workers' public health URLs here too (the entrypoints
+          # answer 200 on GET /, e.g. https://viralcut-worker.onrender.com).
+          PING_URLS: ${{ vars.PING_URLS || 'https://viralcut-ai-wtu5.onrender.com/healthz https://viralcut-ai-himanshu-s-projects-6274cb5e.vercel.app/' }}
+        run: |
+          failures=0
+          for url in $PING_URLS; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -m 120 "$url" || echo "000")
+            echo "  $code  $url"
+            case "$code" in
+              2*|3*) : ;;  # 2xx/3xx = alive
+              *) failures=$((failures + 1)) ;;
+            esac
+          done
+          echo "failures=$failures"
+          if [ "$failures" -gt 0 ]; then
+            echo "::error::one or more endpoints did not answer 2xx/3xx -- check the deploy" >&2
+            exit 1
+          fi

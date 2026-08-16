@@ -1,11 +1,12 @@
 import uuid
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_owned_project
 from app.schemas.project import ProjectCreate, ProjectRead, ProjectUpdate
 from app.services.project_service import (
+    ProjectLimitError,
     create_project,
     delete_project,
     list_projects,
@@ -23,7 +24,14 @@ async def create(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Project:
-    return await create_project(db, user_id=current_user.id, data=payload)
+    try:
+        return await create_project(
+            db, user_id=current_user.id, data=payload, plan=current_user.plan
+        )
+    except ProjectLimitError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)
+        ) from exc
 
 
 @router.get("", response_model=list[ProjectRead])

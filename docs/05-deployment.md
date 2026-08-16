@@ -265,14 +265,43 @@ needs no card either.
 
 ## Step 8 -- Close the loop: CORS
 
-Once Vercel gives you its real domain, go back to the `api` service's env
-vars on Render and set:
+The API allows any `https://*.vercel.app` origin automatically (regex in
+`app/main.py`), so a Vercel deploy works with zero CORS config -- Vercel
+changes its deployment URL on every push and the API accepts them all.
+`ALLOWED_ORIGINS` still works for anything else (a custom domain, local
+dev); it accepts a JSON array or comma-separated list:
 
 ```
-ALLOWED_ORIGINS=["https://your-actual-project.vercel.app"]
+ALLOWED_ORIGINS=["https://your-actual-project.vercel.app","https://app.yourdomain.com"]
 ```
 
-Redeploy `api` for the change to take effect.
+## Step 8b -- Production-readiness features (built-in, no config)
+
+- **Rate limiting.** In-process sliding-window limits per client IP:
+  `register`/`login` at 10/min, upload-starts at 20/min, general requests
+  at 600/min. Dependency-free and right-sized for Render's single API
+  instance; if the API ever scales horizontally, swap `app/core/abuse.py`
+  for a Redis-backed limiter (Redis is already in the stack).
+- **Security headers.** OWASP baseline (`X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`) set by
+  `SecurityHeadersMiddleware` in `app/main.py`.
+- **Plan limits.** Every tier (free/creator/pro/business) caps projects,
+  clips per project, upload size, export quality, and exports per project
+  (`app/core/plan_limits.py`). Enforcement is server-side in the service
+  layer; the frontend shows live usage and gates uploads client-side using
+  `GET /api/v1/plans/me`. The public `GET /api/v1/plans` endpoint drives the
+  marketing pricing page. New accounts start on `free`; assigning paid tiers
+  is a billing integration (Stripe, Phase 2) -- until then, promote a user
+  by updating `users.plan` in the DB directly.
+- **Keep-alive.** `.github/workflows/keep-alive.yml` pings every prod
+  endpoint every 10 minutes (GitHub Actions cron), which keeps Render's
+  free-tier services from sleeping after 15 idle minutes -- no cold-start
+  delay for real visitors, at zero cost. Add any new public URLs to the
+  `PING_URLS` repo variable (Settings -> Secrets and variables -> Actions
+  -> Variables).
+- **Abandoned-upload cleanup.** A Celery beat task (`-B` embedded in the
+  worker) sweeps pending multipart sessions hourly, plus the bucket
+  lifecycle rule from Step 2 as the provider-side backstop.
 
 ## Step 9 -- Verify
 

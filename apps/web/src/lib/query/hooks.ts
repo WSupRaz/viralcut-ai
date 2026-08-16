@@ -19,6 +19,14 @@ export function useStyles() {
   return useQuery({ queryKey: ["styles"], queryFn: () => api.listStyles(token) });
 }
 
+export function useMyPlan() {
+  const token = useToken();
+  return useQuery({
+    queryKey: ["plans", "me"],
+    queryFn: () => api.myPlan(token),
+  });
+}
+
 export function useProjects() {
   const token = useToken();
   return useQuery({ queryKey: ["projects"], queryFn: () => api.listProjects(token) });
