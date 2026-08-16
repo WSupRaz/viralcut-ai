@@ -102,6 +102,22 @@ R2_BUCKET_NAME=<bucket> \
   python infra/scripts/configure_bucket_cors.py \
   --origin https://<your-vercel-domain>
 
+Troubleshooting (this exact failure happened in production):
+
+- The rule's origin must be the **stable production alias** (e.g.
+  `https://<project>-<owner>.vercel.app`) -- per-deploy URLs like
+  `https://viralcut-abc123-<owner>.vercel.app` change on every deploy and
+  will silently break the upload later. The API's CORS allows all vercel.app
+  origins, but B2 matches the exact origin string.
+- If the console's CORS modal says "custom rules in place" (radio options
+  disabled), the bucket's rules were set via API/CLI; the console can't edit
+  them. Read them with the B2 API (`b2_list_buckets` -> `corsRules`, or
+  `b2 bucket get --show-json`) and **merge** your rule into the existing
+  list before re-applying -- `b2_update_bucket`/`PutBucketCors` replace the
+  whole ruleset.
+- Changes take effect in ~1 minute; verify with an OPTIONS preflight from
+  your Vercel origin (expect `access-control-allow-origin` echoed back).
+
 # Or the provider console: Bucket -> CORS Rules -> New rule:
 #   AllowedOrigins = your Vercel domain (* works for dev but is wider)
 #   AllowedMethods = GET, PUT, POST, DELETE, HEAD
