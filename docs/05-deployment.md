@@ -163,10 +163,15 @@ services already read it (`api.Dockerfile`'s CMD, `render-worker`'s
 `config.ts`, and the new `workers/entrypoint.py`). Instance type: Free, for
 all three, to start.
 
-Render's default health check path is `/`, which none of these three
-services define -- set **Health Check Path** explicitly in each service's
-settings: `/healthz` for `api` and `render-worker`, `/` for `worker`
-(`workers/entrypoint.py`'s health server answers 200 on any path).
+Render's default health check is a TCP socket probe (it accepts the
+connection), so services pass without any configuration -- but if you enable
+an HTTP health check path, point it at a route the service actually answers.
+`/healthz` for `api` (and the API also answers 200 on `/`), `/` for
+`render-worker` and `worker` (`workers/entrypoint.py`'s health server
+answers 200 on any path). A wrong HTTP health check path is the classic
+cause of "Deploy failed" emails with no obvious crash: Render probes the
+path for up to 15 minutes, then cancels the deploy and keeps the old
+instance running.
 
 ### Environment variables (all three services)
 

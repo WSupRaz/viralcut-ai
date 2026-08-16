@@ -53,3 +53,11 @@ app.include_router(api_router)
 @app.get("/healthz", tags=["health"])
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/", tags=["health"], include_in_schema=False)
+async def root() -> dict[str, str]:
+    # Some PaaS setups (Render HTTP health checks, uptime monitors) probe the
+    # root path. Return 200 so a deploy can never fail purely on the health
+    # check path; the real health signal is /healthz.
+    return {"service": "viralcut-api", "status": "ok"}
