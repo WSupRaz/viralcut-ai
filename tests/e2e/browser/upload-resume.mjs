@@ -76,10 +76,16 @@ try {
   await page.waitForLoadState("networkidle");
   // The form is behind a "New project" button on the redesigned dashboard;
   // click it when present (older builds show the form inline).
-  const newProjectBtn = page.getByRole("button", { name: "New project" });
-  if (await newProjectBtn.isVisible().catch(() => false)) {
+  // NOTE: wait for the button rather than probing isVisible() — on a cold
+  // server the page can still be hydrating when we first look, and the
+  // click would be skipped entirely (then #title never appears).
+  const newProjectBtn = page.getByRole("button", { name: "New project" }).first();
+  try {
+    await newProjectBtn.waitFor({ state: "visible", timeout: 10_000 });
     await newProjectBtn.click();
-    await page.waitForTimeout(300);
+    await page.locator("#title").waitFor({ state: "visible", timeout: 10_000 });
+  } catch {
+    // Older builds render the form inline — #title should already be present.
   }
   await page.fill("#title", "Browser resumable upload E2E");
   await page.getByRole("button", { name: "Create project" }).click();
