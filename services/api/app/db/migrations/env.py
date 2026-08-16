@@ -6,6 +6,7 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.core.config import settings
+from app.db.session import _normalize_database_url
 from db_models.base import Base
 from db_models.models import *  # noqa: F401,F403 -- registers every model on Base.metadata
 
@@ -13,14 +14,21 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# PaaS DATABASE_URLs (Neon/Render/Supabase) carry psycopg2-style query params
+# (?sslmode=require&channel_binding=require) that asyncpg's connect() rejects.
+# session.py normalizes these for the app engine; do the same here or every
+# migration run dies with: TypeError: connect() got an unexpected keyword
+# argument 'sslmode'.
+config.set_main_option(
+    "sqlalchemy.url", _normalize_database_url(settings.database_url)
+)
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
     context.configure(
-        url=settings.database_url,
+        url=_normalize_database_url(settings.database_url),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},

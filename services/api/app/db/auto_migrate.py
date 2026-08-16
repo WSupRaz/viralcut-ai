@@ -28,6 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import settings
+from app.db.session import _normalize_database_url
 
 # Revision that created the base schema. If those tables exist but alembic
 # has no version for them, we can safely stamp here and let upgrade apply
@@ -53,7 +54,7 @@ def _cfg() -> AlembicConfig:
 
 
 async def _base_schema_exists() -> bool:
-    engine = create_async_engine(settings.database_url)
+    engine = create_async_engine(_normalize_database_url(settings.database_url))
     try:
         async with engine.connect() as conn:
             rows = await conn.execute(
