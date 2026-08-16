@@ -33,6 +33,12 @@ app = FastAPI(title="ViralCut AI API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
+    # The frontend is a Vercel deployment whose URL changes on every push;
+    # regex covers all current + future *.vercel.app origins (any user who
+    # could reach the API through one already has a token; this only controls
+    # what a browser may send/read). Explicit origins in settings.allowed_origins
+    # cover local dev and any custom domain.
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

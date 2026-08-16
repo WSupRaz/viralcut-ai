@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # so this only needs to be set for local dev.
     r2_public_endpoint_url: str | None = None
 
+    # Browser origins allowed to call the API. The frontend is deployed to
+    # Vercel, whose deployment + preview URLs change on every push, so main.py
+    # also allows any *.vercel.app origin via regex -- explicit entries here
+    # are for local dev and any custom domain. Accepts a JSON array or a
+    # comma-separated list in the ALLOWED_ORIGINS env var.
     allowed_origins: list[str] = ["http://localhost:3000"]
 
     # Hard cap for a single source-video upload. 5 GiB matches the S3
