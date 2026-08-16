@@ -12,10 +12,14 @@ set -e
 
 echo "[entrypoint] Current DB revision: $(alembic current 2>&1 | tail -1)"
 
-if alembic upgrade head; then
+# app/db/auto_migrate.py: upgrade to head, and heal databases that were
+# created outside Alembic (no version rows) by stamping the base revision
+# and re-running. Failures are logged, never fatal -- a crash-looping
+# container would pin the host to the previous deploy forever.
+if python -m app.db.auto_migrate; then
   echo "[entrypoint] Migrations up to date."
 else
-  echo "[entrypoint] WARNING: 'alembic upgrade head' FAILED -- starting anyway; the error above is the diagnosis." >&2
+  echo "[entrypoint] WARNING: migration FAILED -- starting anyway; the [auto-migrate] log lines above are the diagnosis." >&2
 fi
 
 echo "[entrypoint] Starting API on 0.0.0.0:${PORT:-8000}"
