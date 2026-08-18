@@ -54,6 +54,9 @@ export interface UploadProgress {
 
 const SESSION_PREFIX = "viralcut.upload.session.";
 const PART_RETRY_ATTEMPTS = 4;
+// The finalize call is cheap and idempotent-ish, and by the time it runs the
+// whole file is already uploaded -- worth trying harder than a part.
+const COMPLETE_RETRY_ATTEMPTS = 5;
 const PART_RETRY_BACKOFF_MS = [1000, 2000, 4000, 8000];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -317,16 +320,53 @@ export async function uploadVideoChunked(options: UploadOptions): Promise<Upload
     }
 
     emit(onProgress, state, "verifying");
+    // Every byte is already in storage by this point; this call only asks the
+    // server to verify and assemble the parts. Failing the whole upload
+    // because this one request hit a blip -- after a multi-gigabyte transfer
+    // succeeded -- is the worst possible moment to give up, so it gets the
+    // same retry treatment the parts do. Only transient failures qualify:
+    // a 4xx is a real verdict about the upload and must surface immediately.
     let job;
-    try {
-      job = await api.completeUpload(token, projectId, session.sourceVideoId);
-    } catch (error) {
-      if (isAbort(error)) throw error;
-      if (error instanceof ApiError && error.status === 409) {
-        clearUploadSession(projectId);
-        throw new ApiError(409, "Upload session expired. Select the file again to resume.");
+    let networkAttempts = 0;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        job = await api.completeUpload(token, projectId, session.sourceVideoId);
+        break;
+      } catch (error) {
+        if (isAbort(error)) throw error;
+
+        const status = error instanceof ApiError ? error.status : 0;
+        // status 0 covers a fetch that never got a response at all (dropped
+        // connection, DNS failure) -- indistinguishable from a CORS error in
+        // the browser, and the most common shape of this failure.
+        const transient = status === 0 || status >= 500 || status === 408 || status === 429;
+
+        if (error instanceof ApiError && status === 409) {
+          if (networkAttempts > 0) {
+            // A previous attempt lost its response, so that attempt probably
+            // did complete the upload server-side and this 409 is us asking
+            // twice -- don't tell the user their finished upload expired.
+            clearUploadSession(projectId);
+            throw new ApiError(
+              409,
+              "The upload finished but the confirmation was lost. Refresh the page to check before re-uploading."
+            );
+          }
+          clearUploadSession(projectId);
+          throw new ApiError(409, "Upload session expired. Select the file again to resume.");
+        }
+
+        if (!transient || attempt >= COMPLETE_RETRY_ATTEMPTS) throw error;
+
+        networkAttempts += 1;
+        emit(onProgress, state, "verifying", {
+          retrying: true,
+          error: error instanceof ApiError ? error.message : "Network error",
+        });
+        const backoff =
+          PART_RETRY_BACKOFF_MS[Math.min(attempt - 1, PART_RETRY_BACKOFF_MS.length - 1)];
+        await sleep(backoff + Math.random() * 500);
       }
-      throw error;
     }
     clearUploadSession(projectId);
     emit(onProgress, { ...state, uploadedBytes: file.size }, "complete");
