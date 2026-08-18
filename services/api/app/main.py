@@ -1,8 +1,11 @@
 import asyncio
+import traceback
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.v1.router import api_router
 from app.core.abuse import SecurityHeadersMiddleware
@@ -29,7 +32,43 @@ async def lifespan(_: FastAPI):
     yield
 
 
+class UnhandledErrorMiddleware(BaseHTTPMiddleware):
+    """Turn an unhandled exception into a normal 500 *response*.
+
+    Starlette's ServerErrorMiddleware sits outside every user middleware,
+    including CORS, so a 500 it produces carries no Access-Control-Allow-Origin
+    header. A browser then cannot read the response at all: fetch rejects with
+    an opaque network error and the console reports a CORS failure, hiding the
+    fact that the server answered and what it said. Debugging any 500 from the
+    client is impossible in that state.
+
+    Catching here -- inside CORSMiddleware -- means the response travels back
+    out through it and gets the header, so the client sees a real 500 with a
+    readable body. The traceback still goes to the host's logs.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception:
+            print(
+                f"[unhandled] {request.method} {request.url.path}\n{traceback.format_exc()}",
+                flush=True,
+            )
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error. The failure was logged."},
+            )
+
+
 app = FastAPI(title="ViralCut AI API", version="0.1.0", lifespan=lifespan)
+
+# Registration order matters and is inverted: add_middleware inserts at the
+# front, so the LAST one added is the outermost. CORS must be outermost so it
+# can stamp headers on responses produced by everything inside it, including
+# UnhandledErrorMiddleware's 500s.
+app.add_middleware(UnhandledErrorMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -44,8 +83,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(api_router)
 

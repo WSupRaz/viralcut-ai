@@ -59,6 +59,13 @@ class UploadNotFoundError(Exception):
     pass
 
 
+class StorageUnavailableError(Exception):
+    """The object store rejected or failed a call we cannot recover from
+    here (transient 5xx, InvalidPart, EntityTooSmall...). Distinct from an
+    expired session so the caller can tell 'retry this' from 'start over',
+    and so it never surfaces as an opaque 500."""
+
+
 class UploadSessionExpiredError(Exception):
     pass
 
@@ -255,15 +262,31 @@ async def complete_source_video_upload(
             )
 
     ordered = [by_number[n] for n in range(1, part_count + 1)]
-    complete_multipart_upload(source_video.r2_key_raw, source_video.upload_id, ordered)
+    # Assembling and verifying the object are calls to the object store, and
+    # any of them can fail for reasons that are not the client's fault: a
+    # transient 5xx from the provider, InvalidPart, EntityTooSmall. Left
+    # unhandled these became a bare 500, which a browser cannot even read
+    # (ServerErrorMiddleware sits outside CORS), so the upload just "failed"
+    # with no explanation after every byte had already arrived.
+    try:
+        complete_multipart_upload(source_video.r2_key_raw, source_video.upload_id, ordered)
+        stored_size = object_size(source_video.r2_key_raw)
+        is_video = head_is_video_container(source_video.r2_key_raw)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("NoSuchUpload", "NoSuchKey", "404"):
+            raise UploadSessionExpiredError(str(source_video_id)) from exc
+        raise StorageUnavailableError(
+            f"Storage rejected the upload ({code or 'unknown error'}). "
+            "Your file is still uploaded -- try finishing again in a moment."
+        ) from exc
 
-    stored_size = object_size(source_video.r2_key_raw)
     if stored_size != source_video.size_bytes:
         raise UploadIncompleteError(
             f"Uploaded object is {stored_size} bytes but {source_video.size_bytes} "
             "were declared; re-upload the file."
         )
-    if not head_is_video_container(source_video.r2_key_raw):
+    if not is_video:
         raise NotAVideoError(
             "Uploaded file does not look like an MP4/MOV video. Check the file and re-upload."
         )

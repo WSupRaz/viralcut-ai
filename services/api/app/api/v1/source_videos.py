@@ -21,6 +21,7 @@ from app.services.source_video_service import (
     UnsupportedVideoTypeError,
     UploadIncompleteError,
     UploadNotFoundError,
+    StorageUnavailableError,
     UploadSessionExpiredError,
     complete_source_video_upload,
     delete_source_video,
@@ -141,6 +142,10 @@ async def complete_upload(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (UploadIncompleteError, NotAVideoError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except StorageUnavailableError as exc:
+        # 502, not 500: the failure is upstream in the object store, the
+        # client's bytes are fine, and retrying the same call is worthwhile.
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 @router.post(
