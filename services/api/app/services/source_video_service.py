@@ -108,6 +108,66 @@ async def _cleanup_abandoned_uploads(db: AsyncSession, *, project_id: uuid.UUID)
     await db.commit()
 
 
+async def _recover_pending_uploads(db: AsyncSession, *, project_id: uuid.UUID) -> None:
+    """Heal rows left stuck by a lost complete response.
+
+    A pending row whose object is already fully assembled in storage is a
+    finished upload that never got acknowledged. Left alone it stays
+    upload_pending forever, stays invisible in the clip list, and still counts
+    against the per-project clip limit -- so a few of them lock the user out of
+    uploading at all. Sweep them whenever a new upload starts."""
+    result = await db.execute(
+        select(SourceVideo).where(
+            SourceVideo.project_id == project_id,
+            SourceVideo.upload_id.is_not(None),
+        )
+    )
+    for pending in result.scalars().all():
+        try:
+            if object_size(pending.r2_key_raw) == pending.size_bytes:
+                await _finalize_assembled_upload(db, source_video=pending)
+        except Exception as exc:  # noqa: BLE001
+            # Recovery is opportunistic -- never block a new upload because an
+            # old row could not be healed. It stays pending and is retried on
+            # the next start, or aged out by the abandoned-upload sweep.
+            print(f"[upload-recovery] {pending.id}: {exc}", flush=True)
+
+
+async def _reusable_pending_upload(
+    db: AsyncSession, *, project_id: uuid.UUID, filename: str, size_bytes: int
+) -> SourceVideo | None:
+    """An open session for the very same file, so a repeat upload resumes it
+    instead of starting a parallel one. Without this, every retry created a
+    fresh row and re-sent the whole file -- duplicates accumulate, each one
+    consuming a clip slot."""
+    result = await db.execute(
+        select(SourceVideo)
+        .where(
+            SourceVideo.project_id == project_id,
+            SourceVideo.upload_id.is_not(None),
+            SourceVideo.original_filename == filename,
+            SourceVideo.size_bytes == size_bytes,
+        )
+        .order_by(SourceVideo.created_at.desc())
+    )
+    candidates = list(result.scalars().all())
+    if not candidates:
+        return None
+
+    # Keep the newest; older duplicates of the same file are dead weight.
+    keep, *duplicates = candidates
+    for dupe in duplicates:
+        try:
+            abort_multipart_upload(dupe.r2_key_raw, dupe.upload_id)
+            delete_object(dupe.r2_key_raw)
+        except Exception:  # noqa: BLE001 -- best effort; the row is what matters
+            pass
+        await db.delete(dupe)
+    if duplicates:
+        await db.commit()
+    return keep
+
+
 async def start_source_video_upload(
     db: AsyncSession, *, project_id: uuid.UUID, data: SourceVideoUploadStartRequest, plan: PlanTier
 ) -> SourceVideoUploadStartResponse:
@@ -125,13 +185,33 @@ async def start_source_video_upload(
     if data.size_bytes > effective_cap:
         raise FileTooLargeError(data.size_bytes, cap=effective_cap, plan=plan)
 
+    # Housekeeping runs BEFORE the clip-limit check, not after: stuck and
+    # abandoned rows count toward the limit, so a project holding a few of them
+    # is locked out of uploading entirely -- and the fix for those rows lives
+    # right here. Checking the limit first would make the lockout permanent.
+    await _cleanup_abandoned_uploads(db, project_id=project_id)
+    await _recover_pending_uploads(db, project_id=project_id)
+
+    # Same file already mid-upload? Hand back that session so the client
+    # resumes it rather than uploading a second copy alongside it. Also runs
+    # before the limit check -- resuming adds no new clip.
+    existing = await _reusable_pending_upload(
+        db, project_id=project_id, filename=data.filename, size_bytes=data.size_bytes
+    )
+    if existing is not None:
+        return SourceVideoUploadStartResponse(
+            source_video_id=existing.id,
+            upload_id=existing.upload_id,
+            r2_key=existing.r2_key_raw,
+            part_size=MULTIPART_PART_SIZE_BYTES,
+            part_count=compute_multipart_part_count(existing.size_bytes),
+        )
+
     clip_count = await db.execute(
         select(func.count()).select_from(SourceVideo).where(SourceVideo.project_id == project_id)
     )
     if clip_count.scalar_one() >= plan_limits.max_clips_per_project:
         raise ClipLimitError(plan_limits.max_clips_per_project, plan)
-
-    await _cleanup_abandoned_uploads(db, project_id=project_id)
 
     order_index_result = await db.execute(
         select(func.count()).select_from(SourceVideo).where(SourceVideo.project_id == project_id)
@@ -204,9 +284,21 @@ async def get_upload_parts(
 async def generate_part_upload_url(
     db: AsyncSession, *, project_id: uuid.UUID, source_video_id: uuid.UUID, part_number: int
 ) -> str:
-    source_video = await _get_pending_upload(
-        db, project_id=project_id, source_video_id=source_video_id
+    result = await db.execute(
+        select(SourceVideo).where(
+            SourceVideo.id == source_video_id,
+            SourceVideo.project_id == project_id,
+        )
     )
+    source_video = result.scalar_one_or_none()
+    if source_video is None:
+        raise UploadNotFoundError(str(source_video_id))
+    if source_video.upload_id is None:
+        # Already completed. The client only calls this again because a
+        # previous response never arrived, so answer with the job that call
+        # created instead of a 404 it cannot act on.
+        return await _proxy_job_for(db, source_video=source_video)
+
     part_count = compute_multipart_part_count(source_video.size_bytes)
     if part_number < 1 or part_number > part_count:
         raise UploadNotFoundError(f"part {part_number} out of range 1..{part_count}")
@@ -221,6 +313,35 @@ async def generate_part_upload_url(
         raise
 
 
+async def _finalize_assembled_upload(db: AsyncSession, *, source_video: SourceVideo) -> Job:
+    """Mark a row done when the object is already assembled in storage.
+
+    Reached when the multipart session no longer exists. That has two very
+    different causes: the session was aborted/expired, or a previous complete
+    call already assembled the object and only its HTTP response was lost.
+    CompleteMultipartUpload on a multi-hundred-megabyte file takes long enough
+    that a dropped response is routine, so assuming the first meaning strands a
+    fully-uploaded object behind a row that can never leave upload_pending --
+    and every retry adds another one. Ask storage which case it is."""
+    stored_size = object_size(source_video.r2_key_raw)
+    if stored_size is None:
+        # Genuinely gone: nothing was ever assembled.
+        raise UploadSessionExpiredError(str(source_video.id))
+    if stored_size != source_video.size_bytes:
+        raise UploadIncompleteError(
+            f"Uploaded object is {stored_size} bytes but {source_video.size_bytes} "
+            "were declared; re-upload the file."
+        )
+    if not head_is_video_container(source_video.r2_key_raw):
+        raise NotAVideoError(
+            "Uploaded file does not look like an MP4/MOV video. Check the file and re-upload."
+        )
+
+    source_video.upload_id = None
+    await db.commit()
+    return await _proxy_job_for(db, source_video=source_video)
+
+
 async def complete_source_video_upload(
     db: AsyncSession, *, project_id: uuid.UUID, source_video_id: uuid.UUID
 ) -> Job:
@@ -229,9 +350,21 @@ async def complete_source_video_upload(
     process), sanity-check it looks like a video, then enqueue the proxy
     task. The Celery task receives only IDs -- the raw binary never touches
     Redis or Postgres, and never this process's memory."""
-    source_video = await _get_pending_upload(
-        db, project_id=project_id, source_video_id=source_video_id
+    result = await db.execute(
+        select(SourceVideo).where(
+            SourceVideo.id == source_video_id,
+            SourceVideo.project_id == project_id,
+        )
     )
+    source_video = result.scalar_one_or_none()
+    if source_video is None:
+        raise UploadNotFoundError(str(source_video_id))
+    if source_video.upload_id is None:
+        # Already completed. The client only calls this again because a
+        # previous response never arrived, so answer with the job that call
+        # created instead of a 404 it cannot act on.
+        return await _proxy_job_for(db, source_video=source_video)
+
     part_count = compute_multipart_part_count(source_video.size_bytes)
 
     try:
@@ -239,7 +372,9 @@ async def complete_source_video_upload(
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
         if code in ("NoSuchUpload", "NoSuchKey", "404"):
-            raise UploadSessionExpiredError(str(source_video_id)) from exc
+            # Completing is idempotent: if the object is already assembled,
+            # this is a repeat of a call that succeeded but lost its response.
+            return await _finalize_assembled_upload(db, source_video=source_video)
         raise
 
     by_number = {p["part_number"]: p for p in parts}
@@ -319,6 +454,24 @@ async def retry_source_video_processing(
             "Source video is not in storage. Re-upload it before retrying processing."
         )
 
+    return await _enqueue_proxy(db, source_video=source_video)
+
+
+async def _proxy_job_for(db: AsyncSession, *, source_video: SourceVideo) -> Job:
+    """The proxy job already queued for this video, if any.
+
+    Completing is retried by the client whenever a response goes missing, so
+    it has to be safe to call twice. Blindly enqueueing again would give one
+    clip a second transcode -- the same pile-up that filled the queue with
+    duplicate jobs for a single video."""
+    result = await db.execute(
+        select(Job)
+        .where(Job.source_video_id == source_video.id, Job.type == JobType.PROXY)
+        .order_by(Job.created_at.desc())
+    )
+    existing = result.scalars().first()
+    if existing is not None:
+        return existing
     return await _enqueue_proxy(db, source_video=source_video)
 
 
