@@ -1,6 +1,6 @@
-import subprocess
 import tempfile
 import uuid
+from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
 
@@ -10,22 +10,30 @@ from db_models.models.source_video import SourceVideo
 
 from workers.celery_app import celery_app
 from workers.db import get_session_factory
-from workers.ffmpeg import probe_duration_seconds, run_ffmpeg
+from workers.ffmpeg import (
+    probe_duration_seconds,
+    run_ffmpeg,
+    run_ffmpeg_streaming_progress,
+)
 from workers.storage import download_to_path, upload_from_path
 
 PROXY_HEIGHT = 480
 PROXY_FPS = 15
 
 
-def _transcode_proxy(input_path: Path, output_path: Path) -> None:
+def _transcode_proxy(
+    input_path: Path,
+    output_path: Path,
+    duration_seconds: float | None = None,
+    on_progress: Callable[[float], None] | None = None,
+) -> None:
     # Unset thread count auto-scales to every CPU the container reports
     # (8 here) -- decoding a 4K source across that many threads holds that
     # many ~12MB raw frames in flight at once, easily enough to blow a
     # free-tier instance's 512MB RAM ceiling before encoding even starts.
     # Single-threaded is slower but bounds decode memory to ~one frame at a
     # time; -bf 0 avoids the encoder buffering frames for B-frame reordering.
-    run_ffmpeg(
-        [
+    args = [
             "ffmpeg", "-y",
             "-threads", "1",
             "-i", str(input_path),
@@ -43,9 +51,14 @@ def _transcode_proxy(input_path: Path, output_path: Path) -> None:
             "-c:a", "aac", "-b:a", "96k",
             "-movflags", "+faststart",
             str(output_path),
-        ],
-        label="proxy transcode",
-    )
+    ]
+
+    if on_progress is None:
+        run_ffmpeg(args, label="proxy transcode")
+    else:
+        run_ffmpeg_streaming_progress(
+            args, duration_seconds, on_progress, label="proxy transcode"
+        )
 
 
 def _set_stage(session_factory, job_id: uuid.UUID, progress_pct: int, stage: str) -> None:
@@ -102,7 +115,24 @@ def generate_proxy(self, source_video_id: str, job_id: str) -> dict:
                 Decimal("0.001")
             )
             _set_stage(session_factory, job_id, 40, "Transcoding proxy")
-            _transcode_proxy(raw_path, proxy_path)
+
+            # Throttled so a long encode doesn't write a row per progress
+            # line; enough to prove liveness without hammering the database.
+            last_written = 0.0
+
+            def report(fraction: float) -> None:
+                nonlocal last_written
+                if fraction - last_written < 0.02:
+                    return
+                last_written = fraction
+                _set_stage(
+                    session_factory,
+                    job_id,
+                    40 + int(fraction * 48),
+                    f"Transcoding proxy ({int(fraction * 100)}%)",
+                )
+
+            _transcode_proxy(raw_path, proxy_path, float(duration), report)
             _set_stage(session_factory, job_id, 90, "Uploading proxy")
 
             proxy_key = f"proxy/{project_id}/{source_video_id}.mp4"

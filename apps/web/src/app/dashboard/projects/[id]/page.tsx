@@ -462,7 +462,13 @@ export default function ProjectDetailPage() {
                               {badgeLabel}
                               {isActiveJob && job!.progress_pct > 0 && ` (${job!.progress_pct}%)`}
                             </Badge>
-                            {(video.status === "uploaded" || video.status === "failed") && (
+                            {/* Only offer a retry when nothing is already in
+                                flight for this clip: each click enqueues a
+                                fresh proxy job, and with an active job still
+                                running they stack up (one clip, a dozen
+                                queued transcodes) and starve the worker. */}
+                            {(video.status === "uploaded" || video.status === "failed") &&
+                              !isActiveJob && (
                               <Button
                                 type="button"
                                 variant="ghost"
