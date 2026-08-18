@@ -207,8 +207,17 @@ async def start_source_video_upload(
             part_count=compute_multipart_part_count(existing.size_bytes),
         )
 
+    # Count finished uploads only. A row with an open multipart session is an
+    # attempt, not a clip: the UI hides those rows, so counting them let a few
+    # failed attempts fill the quota with things the user could neither see nor
+    # delete -- locked out of a project without ever completing one upload.
     clip_count = await db.execute(
-        select(func.count()).select_from(SourceVideo).where(SourceVideo.project_id == project_id)
+        select(func.count())
+        .select_from(SourceVideo)
+        .where(
+            SourceVideo.project_id == project_id,
+            SourceVideo.upload_id.is_(None),
+        )
     )
     if clip_count.scalar_one() >= plan_limits.max_clips_per_project:
         raise ClipLimitError(plan_limits.max_clips_per_project, plan)

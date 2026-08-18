@@ -449,14 +449,21 @@ export default function ProjectDetailPage() {
               <Separator />
               <ul className="flex flex-col gap-2">
                 {sourceVideos
-                  .filter((video) => !video.upload_pending)
+                  // Unfinished uploads are shown too, not hidden. A row the
+                  // user cannot see is a row they cannot delete -- and a few
+                  // of those used to be enough to make a project unusable with
+                  // no visible cause. The one exception is the upload running
+                  // right now, which has its own progress UI above.
+                  .filter((video) => !(video.upload_pending && uploadingCount > 0))
                   .map((video) => {
                     const job = latestJobForVideo(video.id);
                     const isActiveJob =
                       job && (job.status === "queued" || job.status === "running" || job.status === "retrying");
-                    const badgeLabel = isActiveJob
-                      ? `${JOB_TYPE_LABEL[job.type] ?? "Processing"}: ${job.stage ?? JOB_STATUS_LABEL[job.status]}`
-                      : STATUS_LABEL[video.status];
+                    const badgeLabel = video.upload_pending
+                      ? "Upload never finished"
+                      : isActiveJob
+                        ? `${JOB_TYPE_LABEL[job.type] ?? "Processing"}: ${job.stage ?? JOB_STATUS_LABEL[job.status]}`
+                        : STATUS_LABEL[video.status];
                     return (
                       <li key={video.id} className="flex flex-col gap-1 rounded-md border px-3 py-2 text-sm">
                         <div className="flex items-center justify-between gap-2">
@@ -467,7 +474,13 @@ export default function ProjectDetailPage() {
                           </span>
                           <div className="flex shrink-0 items-center gap-2">
                             <Badge
-                              variant={isActiveJob ? JOB_STATUS_VARIANT[job!.status] : STATUS_VARIANT[video.status]}
+                              variant={
+                                video.upload_pending
+                                  ? "outline"
+                                  : isActiveJob
+                                    ? JOB_STATUS_VARIANT[job!.status]
+                                    : STATUS_VARIANT[video.status]
+                              }
                               title={job?.error ?? undefined}
                             >
                               {badgeLabel}
@@ -479,7 +492,8 @@ export default function ProjectDetailPage() {
                                 running they stack up (one clip, a dozen
                                 queued transcodes) and starve the worker. */}
                             {(video.status === "uploaded" || video.status === "failed") &&
-                              !isActiveJob && (
+                              !isActiveJob &&
+                              !video.upload_pending && (
                               <Button
                                 type="button"
                                 variant="ghost"
