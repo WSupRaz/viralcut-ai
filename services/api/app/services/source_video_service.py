@@ -133,6 +133,38 @@ async def _recover_pending_uploads(db: AsyncSession, *, project_id: uuid.UUID) -
             print(f"[upload-recovery] {pending.id}: {exc}", flush=True)
 
 
+async def _resolve_stuck_row(db: AsyncSession, row: SourceVideo) -> str:
+    """Decide what a row with a vanished multipart session actually is.
+
+    "No multipart session" is ambiguous and has bitten this code three times
+    now: it means the session was aborted OR that it was already completed
+    successfully. Storage is the only thing that can tell them apart, so ask
+    it once, here, rather than guessing at each call site.
+
+    Returns "finalized", "purged", or "unknown" (storage unreachable -- the
+    row is left untouched, because an extra row costs a slot while deleting a
+    real upload costs the upload).
+    """
+    try:
+        stored = object_size(row.r2_key_raw)
+    except (ClientError, BotoCoreError):
+        return "unknown"
+
+    if stored == row.size_bytes:
+        await _finalize_assembled_upload(db, source_video=row)
+        return "finalized"
+
+    try:
+        if row.upload_id:
+            abort_multipart_upload(row.r2_key_raw, row.upload_id)
+        delete_object(row.r2_key_raw)
+    except (ClientError, BotoCoreError):
+        pass  # best effort; removing the row is what matters
+    await db.delete(row)
+    await db.commit()
+    return "purged"
+
+
 async def _reusable_pending_upload(
     db: AsyncSession, *, project_id: uuid.UUID, filename: str, size_bytes: int
 ) -> SourceVideo | None:
@@ -167,25 +199,20 @@ async def _reusable_pending_upload(
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
         if code in ("NoSuchUpload", "NoSuchKey", "404"):
-            try:
-                delete_object(keep.r2_key_raw)
-            except (ClientError, BotoCoreError):
-                pass
-            await db.delete(keep)
-            await db.commit()
+            # Either aborted or already completed -- _resolve_stuck_row asks
+            # storage which, and finalises rather than deleting a real upload.
+            await _resolve_stuck_row(db, keep)
             return None
         return None
     except BotoCoreError:
         # Can't tell -- don't reuse, but leave the row for the next attempt.
         return None
 
+    # A duplicate row can still point at a *complete* object -- that is the
+    # whole reason these rows pile up -- so each one is resolved against
+    # storage rather than deleted on sight.
     for dupe in duplicates:
-        try:
-            abort_multipart_upload(dupe.r2_key_raw, dupe.upload_id)
-            delete_object(dupe.r2_key_raw)
-        except Exception:  # noqa: BLE001 -- best effort; the row is what matters
-            pass
-        await db.delete(dupe)
+        await _resolve_stuck_row(db, dupe)
     if duplicates:
         await db.commit()
     return keep
