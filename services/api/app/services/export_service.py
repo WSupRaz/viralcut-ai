@@ -132,6 +132,7 @@ async def get_export_for_project(
         quality=export.quality,
         job_id=export.job_id,
         job_status=job.status,
+        error=job.error,
         r2_key_output=export.r2_key_output,
         download_url=download_url,
         created_at=export.created_at,

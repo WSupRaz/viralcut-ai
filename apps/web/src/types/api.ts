@@ -149,6 +149,8 @@ export interface Export {
   quality: ExportQuality;
   job_id: string;
   job_status: JobStatus;
+  /** Why the render failed, when it did. */
+  error: string | null;
   r2_key_output: string | null;
   download_url: string | null;
   created_at: string;

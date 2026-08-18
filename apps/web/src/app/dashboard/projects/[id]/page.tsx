@@ -608,21 +608,26 @@ export default function ProjectDetailPage() {
                   {exports.map((exp) => (
                     <li
                       key={exp.id}
-                      className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+                      className="flex flex-col gap-1 rounded-md border px-3 py-2 text-sm"
                     >
-                      <span className="text-muted-foreground">{exp.quality}</span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={JOB_STATUS_VARIANT[exp.job_status]}>
-                          {JOB_STATUS_LABEL[exp.job_status]}
-                        </Badge>
-                        {exp.job_status === "succeeded" && exp.download_url && (
-                          <a href={exp.download_url} target="_blank" rel="noreferrer">
-                            <Button type="button" variant="ghost" size="icon-sm" aria-label="Download export">
-                              <DownloadIcon className="text-muted-foreground" />
-                            </Button>
-                          </a>
-                        )}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground">{exp.quality}</span>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={JOB_STATUS_VARIANT[exp.job_status]}>
+                            {JOB_STATUS_LABEL[exp.job_status]}
+                          </Badge>
+                          {exp.job_status === "succeeded" && exp.download_url && (
+                            <a href={exp.download_url} target="_blank" rel="noreferrer">
+                              <Button type="button" variant="ghost" size="icon-sm" aria-label="Download export">
+                                <DownloadIcon className="text-muted-foreground" />
+                              </Button>
+                            </a>
+                          )}
+                        </div>
                       </div>
+                      {exp.job_status === "failed" && exp.error && (
+                        <p className="text-xs break-words text-destructive">{exp.error}</p>
+                      )}
                     </li>
                   ))}
                 </ul>

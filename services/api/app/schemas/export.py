@@ -20,6 +20,10 @@ class ExportRead(BaseModel):
     quality: ExportQuality
     job_id: uuid.UUID
     job_status: JobStatus
+    # Why the render failed. Held on the job row, but an export row was
+    # the only thing the UI showed -- so a failed export read as a bare
+    # "Failed" badge with the reason unreachable from the client.
+    error: str | None = None
     r2_key_output: str | None
     download_url: str | None
     created_at: datetime
