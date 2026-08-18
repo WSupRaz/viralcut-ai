@@ -122,6 +122,9 @@ interface UploadOptions {
   /** When true, resume the stored session for this file instead of starting
    *  a fresh upload (used after refresh / network failure). */
   resumeExisting?: boolean;
+  /** Internal. Counts self-restarts after a dead session so the retry can
+   *  never become an unbounded loop -- see the 409 branch below. */
+  restartCount?: number;
 }
 
 interface RunningState {
@@ -231,7 +234,23 @@ export async function uploadVideoChunked(options: UploadOptions): Promise<Upload
     // Restart the session cleanly.
     if (error instanceof ApiError && error.status === 409) {
       clearUploadSession(projectId);
-      return uploadVideoChunked({ ...options, resumeExisting: false });
+      // Restart once, never repeatedly. If the fresh session is *also* dead the
+      // condition is not self-correcting, and looping here re-hits
+      // /uploads/start as fast as the network allows -- which trips the
+      // upload-start rate limiter and reports "Too many requests" instead of
+      // the real problem.
+      const restartCount = options.restartCount ?? 0;
+      if (restartCount >= 1) {
+        throw new ApiError(
+          409,
+          "Could not start a fresh upload session for this file. Remove the clip and try uploading again."
+        );
+      }
+      return uploadVideoChunked({
+        ...options,
+        resumeExisting: false,
+        restartCount: restartCount + 1,
+      });
     }
     // Transient -- we'll find out for real when the first part PUT fails.
   }

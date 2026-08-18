@@ -156,6 +156,29 @@ async def _reusable_pending_upload(
 
     # Keep the newest; older duplicates of the same file are dead weight.
     keep, *duplicates = candidates
+
+    # Only hand back a session the provider still knows about. A dead one sends
+    # the client into a loop: it asks for the parts, gets 409, clears its local
+    # session and starts over -- and start hands back the same dead session
+    # again. That spins as fast as the network allows and trips the
+    # upload-start rate limiter within seconds.
+    try:
+        list_parts(keep.r2_key_raw, keep.upload_id)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("NoSuchUpload", "NoSuchKey", "404"):
+            try:
+                delete_object(keep.r2_key_raw)
+            except (ClientError, BotoCoreError):
+                pass
+            await db.delete(keep)
+            await db.commit()
+            return None
+        return None
+    except BotoCoreError:
+        # Can't tell -- don't reuse, but leave the row for the next attempt.
+        return None
+
     for dupe in duplicates:
         try:
             abort_multipart_upload(dupe.r2_key_raw, dupe.upload_id)
