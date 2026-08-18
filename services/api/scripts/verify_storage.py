@@ -49,38 +49,66 @@ def main() -> int:
 
     client = get_internal_r2_client()
     failures = 0
+    probe_key = "_healthcheck/verify_storage_probe"
 
+    def report(label: str, exc: Exception) -> None:
+        if isinstance(exc, ClientError):
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            code = exc.response.get("Error", {}).get("Code", "")
+            msg = exc.response.get("Error", {}).get("Message", "")
+            print(f"  {label:<16} FAIL -- HTTP {status} {code} {msg}".rstrip())
+        else:
+            print(f"  {label:<16} FAIL -- {type(exc).__name__} (unreachable / timeout)")
+
+    # Exercise the operations the app actually performs, in order. head_bucket
+    # alone is not enough: a key with write but no read passes it and still
+    # breaks every upload at the verification step, which is exactly the
+    # failure this script exists to catch.
     print("Checks")
     try:
         client.head_bucket(Bucket=bucket)
         print("  head_bucket      OK   -- credentials valid, bucket reachable")
-    except ClientError as exc:
-        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-        code = exc.response.get("Error", {}).get("Code", "")
-        print(f"  head_bucket      FAIL -- HTTP {status} {code}")
-        if status == 403:
+    except (ClientError, BotoCoreError) as exc:
+        report("head_bucket", exc)
+        if isinstance(exc, ClientError) and exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 403:
             print("                        403 = credentials rejected or not scoped to this bucket")
-        elif status == 404:
-            print("                        404 = bucket does not exist at this endpoint")
-        failures += 1
-    except BotoCoreError as exc:
-        print(f"  head_bucket      FAIL -- {type(exc).__name__} (endpoint unreachable / timeout)")
         failures += 1
 
+    wrote = False
     try:
-        resp = client.list_objects_v2(Bucket=bucket, MaxKeys=5)
-        print(
-            f"  list_objects_v2  OK   -- {resp.get('KeyCount', 0)} object(s) visible "
-            "(max 5 requested)"
-        )
-    except ClientError as exc:
-        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-        code = exc.response.get("Error", {}).get("Code", "")
-        print(f"  list_objects_v2  FAIL -- HTTP {status} {code}")
+        client.put_object(Bucket=bucket, Key=probe_key, Body=b"viralcut-probe", ContentType="text/plain")
+        wrote = True
+        print("  put_object       OK   -- key can WRITE")
+    except (ClientError, BotoCoreError) as exc:
+        report("put_object", exc)
+        print("                        write capability missing -- uploads cannot be assembled")
         failures += 1
-    except BotoCoreError as exc:
-        print(f"  list_objects_v2  FAIL -- {type(exc).__name__}")
-        failures += 1
+
+    if wrote:
+        try:
+            client.head_object(Bucket=bucket, Key=probe_key)
+            print("  head_object      OK   -- key can READ metadata")
+        except (ClientError, BotoCoreError) as exc:
+            report("head_object", exc)
+            print("                        READ capability missing. Uploads assemble and then fail")
+            print("                        verification; the worker also cannot fetch the video.")
+            print("                        Fix: give the application key readFiles on this bucket.")
+            failures += 1
+
+        try:
+            client.get_object(Bucket=bucket, Key=probe_key, Range="bytes=0-7")
+            print("  get_object       OK   -- key can READ contents (ranged)")
+        except (ClientError, BotoCoreError) as exc:
+            report("get_object", exc)
+            failures += 1
+
+        try:
+            client.delete_object(Bucket=bucket, Key=probe_key)
+            print("  delete_object    OK   -- probe cleaned up")
+        except (ClientError, BotoCoreError) as exc:
+            report("delete_object", exc)
+            print(f"                        leftover probe object: {probe_key}")
+            failures += 1
 
     print()
     print("STORAGE OK" if failures == 0 else f"STORAGE FAILING ({failures} check(s) failed)")
