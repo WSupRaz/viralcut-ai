@@ -440,8 +440,10 @@ async def complete_source_video_upload(
             # Completing is idempotent: if the object is already assembled,
             # this is a repeat of a call that succeeded but lost its response.
             return await _finalize_assembled_upload(db, source_video=source_video)
+        detail = exc.response.get("Error", {}).get("Message", "")
         raise StorageUnavailableError(
-            f"Storage could not list the uploaded parts ({code or 'unknown error'}). "
+            f"Storage could not list the uploaded parts ({code or 'unknown error'}"
+            f"{': ' + detail if detail else ''}). "
             "Your file is still uploaded -- try finishing again in a moment."
         ) from exc
     except BotoCoreError as exc:
@@ -484,8 +486,10 @@ async def complete_source_video_upload(
         code = exc.response.get("Error", {}).get("Code", "")
         if code in ("NoSuchUpload", "NoSuchKey", "404"):
             raise UploadSessionExpiredError(str(source_video_id)) from exc
+        detail = exc.response.get("Error", {}).get("Message", "")
         raise StorageUnavailableError(
-            f"Storage rejected the upload ({code or 'unknown error'}). "
+            f"Storage rejected the upload ({code or 'unknown error'}"
+            f"{': ' + detail if detail else ''}). "
             "Your file is still uploaded -- try finishing again in a moment."
         ) from exc
     except BotoCoreError as exc:
