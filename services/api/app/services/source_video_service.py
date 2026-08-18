@@ -478,9 +478,16 @@ async def complete_source_video_upload(
     # unhandled these became a bare 500, which a browser cannot even read
     # (ServerErrorMiddleware sits outside CORS), so the upload just "failed"
     # with no explanation after every byte had already arrived.
+    # Three separate storage operations, each needing a different capability
+    # (write to assemble, read to HEAD, read to range-GET). Reporting them as
+    # one undifferentiated failure makes a 403 impossible to act on -- the
+    # fix for "cannot assemble" is not the fix for "cannot read back".
+    stage = "assembling the upload"
     try:
         complete_multipart_upload(source_video.r2_key_raw, source_video.upload_id, ordered)
+        stage = "checking the assembled file's size"
         stored_size = object_size(source_video.r2_key_raw)
+        stage = "reading the file header"
         is_video = head_is_video_container(source_video.r2_key_raw)
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
@@ -488,7 +495,7 @@ async def complete_source_video_upload(
             raise UploadSessionExpiredError(str(source_video_id)) from exc
         detail = exc.response.get("Error", {}).get("Message", "")
         raise StorageUnavailableError(
-            f"Storage rejected the upload ({code or 'unknown error'}"
+            f"Storage refused while {stage} ({code or 'unknown error'}"
             f"{': ' + detail if detail else ''}). "
             "Your file is still uploaded -- try finishing again in a moment."
         ) from exc
@@ -498,7 +505,7 @@ async def complete_source_video_upload(
         # provider, so this is explicitly retryable: the next attempt finds the
         # finished object and finalises via _finalize_assembled_upload.
         raise StorageUnavailableError(
-            f"Storage is still assembling the upload ({type(exc).__name__}). "
+            f"Storage timed out while {stage} ({type(exc).__name__}). "
             "Your file is uploaded -- try finishing again in a moment."
         ) from exc
 
