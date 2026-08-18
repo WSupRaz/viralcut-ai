@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
     r2_bucket_name: str = "viralcut-assets"
+    # SigV4 signing region. "auto" is the Cloudflare R2 convention and is
+    # what this app has always sent; Backblaze accepts it (every write call
+    # against B2 succeeds with it). Configurable so a provider that does
+    # validate the region against its endpoint can be given the real one
+    # (e.g. us-east-005) without a code change.
+    r2_region: str = "auto"
     r2_public_base_url: str = ""
     # Overrides the computed R2 endpoint; used in dev to point at MinIO instead.
     r2_endpoint_url: str | None = None

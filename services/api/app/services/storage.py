@@ -48,7 +48,7 @@ def _build_r2_client(endpoint_url: str):
             read_timeout=300,
             retries={"max_attempts": 3, "mode": "standard"},
         ),
-        region_name="auto",
+        region_name=settings.r2_region,
     )
 
 
