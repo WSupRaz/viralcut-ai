@@ -14,6 +14,7 @@ from workers.ffmpeg import probe_duration_seconds, run_ffmpeg
 from workers.storage import download_to_path, upload_from_path
 
 PROXY_HEIGHT = 480
+PROXY_FPS = 15
 
 
 def _transcode_proxy(input_path: Path, output_path: Path) -> None:
@@ -28,8 +29,16 @@ def _transcode_proxy(input_path: Path, output_path: Path) -> None:
             "ffmpeg", "-y",
             "-threads", "1",
             "-i", str(input_path),
-            "-vf", f"scale=-2:{PROXY_HEIGHT}",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
+            # Nothing downstream of the proxy needs full frame rate or a
+            # high-quality scaler: it feeds preview, PySceneDetect (which
+            # works off timestamps in seconds, unaffected by fps), and audio
+            # extraction for ASR. The final render re-cuts the *raw* source,
+            # never this file, so cheapening it costs no output quality.
+            # Halving fps and using the cheap scaler cuts the scale+encode
+            # work roughly in half on a 0.1-CPU free-tier instance.
+            "-vf", f"scale=-2:{PROXY_HEIGHT}:flags=fast_bilinear",
+            "-r", str(PROXY_FPS),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
             "-bf", "0",
             "-c:a", "aac", "-b:a", "96k",
             "-movflags", "+faststart",

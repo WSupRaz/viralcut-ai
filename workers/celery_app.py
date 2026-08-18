@@ -1,5 +1,7 @@
 from celery import Celery
+from celery.signals import task_postrun, task_prerun
 
+from workers import keepalive
 from workers.config import settings
 
 celery_app = Celery(
@@ -26,6 +28,21 @@ celery_app.conf.update(
     result_expires=3600,
     broker_connection_retry_on_startup=True,
 )
+
+
+# Registered here rather than per-task so every task -- proxy, metadata, edit
+# plan, render -- is covered automatically. Under the prefork pool these fire
+# inside the child process running the task, so the heartbeat thread's
+# lifetime is scoped to exactly that task.
+@task_prerun.connect
+def _keepalive_task_started(**_kwargs) -> None:
+    keepalive.task_started()
+
+
+@task_postrun.connect
+def _keepalive_task_finished(**_kwargs) -> None:
+    keepalive.task_finished()
+
 
 celery_app.conf.beat_schedule = {
     # Abandoned (never-completed) upload sessions older than the TTL are
