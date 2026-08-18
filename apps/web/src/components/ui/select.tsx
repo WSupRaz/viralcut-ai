@@ -63,7 +63,12 @@ function SelectContent({
   sideOffset = 4,
   align = "center",
   alignOffset = 0,
-  alignItemWithTrigger = true,
+  // Base UI defaults this to true, which positions the popup *over* the
+  // trigger (macOS-native style, selected item aligned on top of the trigger
+  // text). In this UI that reads as the options being hidden behind the
+  // trigger's own label and makes the control feel broken. Drop the list
+  // below the trigger instead, which is what a web select is expected to do.
+  alignItemWithTrigger = false,
   ...props
 }: SelectPrimitive.Popup.Props &
   Pick<

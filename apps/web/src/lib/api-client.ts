@@ -23,6 +23,31 @@ export class ApiError extends Error {
   }
 }
 
+/** A stored token that the API no longer accepts -- expired (tokens last 7
+ *  days), or invalidated because JWT_SECRET was rotated on the server.
+ *
+ *  Without this, a dead token is a dead end: every authenticated request
+ *  401s, so the dashboard renders permanently empty, the style list never
+ *  loads, and the only feedback is a "Could not validate credentials" error
+ *  with no way to act on it. The user is signed in as far as the client is
+ *  concerned, so nothing ever routes them back to /sign-in.
+ *
+ *  Cleared via the store's own setState so persisted localStorage is updated
+ *  too -- otherwise the stale token survives a reload and 401s all over again. */
+function handleExpiredSession(): void {
+  if (typeof window === "undefined") return;
+
+  // Imported lazily: this module is also pulled in by server components,
+  // where the auth store's localStorage-backed persistence has no meaning.
+  void import("@/stores/auth-store").then(({ useAuthStore }) => {
+    useAuthStore.getState().clearAuth();
+  });
+
+  // Already on an auth screen -- don't bounce a failed login attempt.
+  if (window.location.pathname.startsWith("/sign-")) return;
+  window.location.assign("/sign-in?expired=1");
+}
+
 export type UploadProgressCallback = (progress: number) => void;
 
 const UPLOAD_TIMEOUT_MS = 60 * 60 * 1000;
@@ -50,6 +75,9 @@ async function request<T>(
     } catch {
       // response body wasn't JSON -- fall back to statusText
     }
+    // Only when we actually sent a token: /auth/login also answers 401 for a
+    // wrong password, and that must surface as a form error, not a redirect.
+    if (res.status === 401 && token) handleExpiredSession();
     throw new ApiError(res.status, detail);
   }
 
