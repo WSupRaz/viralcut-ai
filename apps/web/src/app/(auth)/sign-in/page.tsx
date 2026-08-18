@@ -30,6 +30,10 @@ export default function SignInPage() {
   // lands here explains itself instead of looking like a random logout.
   const [expired, setExpired] = useState(false);
   useEffect(() => {
+    // Read once on mount rather than during render: this page is statically
+    // prerendered, so touching location during render would hydrate-mismatch
+    // between the server's HTML (no query string) and the client's URL.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setExpired(new URLSearchParams(window.location.search).has("expired"));
   }, []);
 

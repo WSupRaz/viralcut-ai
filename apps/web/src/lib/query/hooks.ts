@@ -123,6 +123,38 @@ export function useUploadSourceVideo(projectId: string) {
   });
 }
 
+/** Upload for callers that don't have a project id until the mutation runs --
+ *  the create-project-and-upload flow creates the project first, so the id
+ *  can't be a hook argument the way useUploadSourceVideo takes it. Same
+ *  chunked/resumable transport underneath; only where the id comes from
+ *  differs. */
+export function useUploadVideoToProject() {
+  const token = useToken();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      file,
+      onProgress,
+      signal,
+      resumeExisting = false,
+    }: {
+      projectId: string;
+      file: File;
+      onProgress?: Parameters<typeof uploadVideoChunked>[0]["onProgress"];
+      signal?: AbortSignal;
+      resumeExisting?: boolean;
+    }) =>
+      uploadVideoChunked({ token, projectId, file, onProgress, signal, resumeExisting }),
+    onSuccess: (_result, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ["projects", variables.projectId, "source-videos"],
+      });
+      queryClient.invalidateQueries({ queryKey: ["projects", variables.projectId, "jobs"] });
+    },
+  });
+}
+
 export function useJobs(projectId: string) {
   const token = useToken();
   return useQuery({

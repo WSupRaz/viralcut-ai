@@ -34,9 +34,8 @@ import {
   useTriggerEditPlan,
   useUploadSourceVideo,
 } from "@/lib/query/hooks";
+import { ACCEPTED_VIDEO_ACCEPT, isAcceptedVideo } from "@/lib/video-file";
 import type { ExportQuality, Job, JobStatus, SourceVideoStatus } from "@/types/api";
-
-const ACCEPTED_TYPES = ["video/mp4", "video/quicktime", "video/x-m4v"];
 
 const STATUS_VARIANT: Record<SourceVideoStatus, "secondary" | "default" | "destructive" | "outline"> = {
   uploaded: "secondary",
@@ -245,7 +244,7 @@ export default function ProjectDetailPage() {
     e.target.value = "";
     if (files.length === 0) return;
 
-    const unsupported = files.filter((f) => !ACCEPTED_TYPES.includes(f.type));
+    const unsupported = files.filter((f) => !isAcceptedVideo(f));
     if (unsupported.length > 0) {
       setError(`Unsupported file type: ${unsupported.map((f) => f.name).join(", ")}. Allowed: mp4, mov, m4v.`);
       return;
@@ -349,7 +348,7 @@ export default function ProjectDetailPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept={ACCEPTED_TYPES.join(",")}
+              accept={ACCEPTED_VIDEO_ACCEPT}
               multiple
               className="hidden"
               onChange={onFilesSelected}

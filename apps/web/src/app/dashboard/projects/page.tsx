@@ -1,8 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
 import { ArrowRightIcon, FolderPlusIcon, SparklesIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,18 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { ApiError } from "@/lib/api-client";
-import { useCreateProject, useMyPlan, useProjects, useStyles } from "@/lib/query/hooks";
+import { useMyPlan, useProjects } from "@/lib/query/hooks";
 import type { ProjectStatus } from "@/types/api";
 
 const STATUS_VARIANT: Record<ProjectStatus, "secondary" | "default" | "destructive" | "outline"> = {
@@ -36,39 +23,12 @@ const STATUS_VARIANT: Record<ProjectStatus, "secondary" | "default" | "destructi
 };
 
 export default function ProjectsPage() {
-  const router = useRouter();
   const { data: projects, isLoading } = useProjects();
   const { data: myPlan } = useMyPlan();
-  const { data: styles } = useStyles();
-  const createProject = useCreateProject();
-
-  const [title, setTitle] = useState("");
-  const [styleId, setStyleId] = useState<string>("");
-  const [instructions, setInstructions] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-
-  const styleItems = styles?.map((style) => ({ value: style.id, label: style.name })) ?? [];
 
   const projectCount = projects?.length ?? 0;
   const projectLimit = myPlan?.limits.max_projects;
   const atProjectLimit = projectLimit !== undefined && projectCount >= projectLimit;
-
-  async function onCreate(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      const project = await createProject.mutateAsync({
-        title,
-        target_aspect_ratio: "9:16",
-        style_id: styleId || null,
-        instructions: instructions || null,
-      });
-      router.push(`/dashboard/projects/${project.id}`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create project");
-    }
-  }
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8">
@@ -90,8 +50,13 @@ export default function ProjectsPage() {
             </div>
           )}
         </div>
-        {!showForm && (
-          <Button onClick={() => setShowForm(true)} disabled={atProjectLimit}>
+        {atProjectLimit ? (
+          <Button disabled>
+            <FolderPlusIcon />
+            New project
+          </Button>
+        ) : (
+          <Button render={<Link href="/dashboard/projects/new" />}>
             <FolderPlusIcon />
             New project
           </Button>
@@ -114,72 +79,10 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {/* New project form */}
-      {showForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle>New project</CardTitle>
-            <CardDescription>
-              Pick a style and describe what you want — vertical (9:16) only for now. You&apos;ll
-              upload footage on the next screen.
-            </CardDescription>
-          </CardHeader>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              onCreate(e);
-            }}
-            className="flex flex-col gap-4 px-4 pb-4"
-          >
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="title">Title</Label>
-              <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} required />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="style">Style</Label>
-              <Select
-                items={styleItems}
-                value={styleId}
-                onValueChange={(value) => setStyleId(value ?? "")}
-              >
-                <SelectTrigger id="style" className="w-full">
-                  <SelectValue placeholder="Choose a style" />
-                </SelectTrigger>
-                <SelectContent>
-                  {styles?.map((style) => (
-                    <SelectItem key={style.id} value={style.id}>
-                      {style.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="instructions">Instructions (optional)</Label>
-              <Textarea
-                id="instructions"
-                placeholder='e.g. "Turn this podcast into a punchy hook-driven short."'
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-              />
-            </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="flex items-center gap-2">
-              <Button type="submit" disabled={createProject.isPending || !title}>
-                {createProject.isPending ? "Creating..." : "Create project"}
-              </Button>
-              <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </Card>
-      )}
-
       {/* Project list */}
       <div className="flex flex-col gap-3">
         {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
-        {!isLoading && projects?.length === 0 && !showForm && (
+        {!isLoading && projects?.length === 0 && (
           <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border px-6 py-16 text-center">
             <span className="flex size-12 items-center justify-center rounded-xl border border-border bg-card">
               <FolderPlusIcon className="size-5 text-muted-foreground" />
@@ -190,10 +93,17 @@ export default function ProjectsPage() {
                 Create your first project to start turning footage into shorts.
               </p>
             </div>
-            <Button onClick={() => setShowForm(true)} disabled={atProjectLimit}>
-              <FolderPlusIcon />
-              New project
-            </Button>
+            {atProjectLimit ? (
+              <Button disabled>
+                <FolderPlusIcon />
+                New project
+              </Button>
+            ) : (
+              <Button render={<Link href="/dashboard/projects/new" />}>
+                <FolderPlusIcon />
+                New project
+              </Button>
+            )}
           </div>
         )}
         <div className="grid gap-3 sm:grid-cols-2">

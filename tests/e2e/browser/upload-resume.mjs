@@ -74,12 +74,16 @@ try {
 
   // ---------- create project ----------
   await page.waitForLoadState("networkidle");
-  // The form is behind a "New project" button on the redesigned dashboard;
-  // click it when present (older builds show the form inline).
-  // NOTE: wait for the button rather than probing isVisible() — on a cold
-  // server the page can still be hydrating when we first look, and the
-  // click would be skipped entirely (then #title never appears).
-  const newProjectBtn = page.getByRole("button", { name: "New project" }).first();
+  // The form lives on a dedicated /dashboard/projects/new page, reached via a
+  // "New project" control. Matched role-agnostically: it renders as an anchor
+  // (it navigates), but older builds rendered it as a button that revealed an
+  // inline form.
+  // NOTE: wait for it rather than probing isVisible() — on a cold server the
+  // page can still be hydrating when we first look, and the click would be
+  // skipped entirely (then #title never appears).
+  const newProjectBtn = page
+    .locator('a:has-text("New project"), button:has-text("New project")')
+    .first();
   try {
     await newProjectBtn.waitFor({ state: "visible", timeout: 10_000 });
     await newProjectBtn.click();
