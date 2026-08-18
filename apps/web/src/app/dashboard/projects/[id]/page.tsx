@@ -132,9 +132,20 @@ export default function ProjectDetailPage() {
           session.fileSize > 0 ? Math.min(100, (uploaded / session.fileSize) * 100) : 0
         );
       })
-      .catch(() => {
-        // Server session may have expired -- Discard will clean it up.
-        if (!cancelled) setPausedPercent(0);
+      .catch((err) => {
+        if (cancelled) return;
+        // 409/404 mean the server-side multipart session is gone, so there is
+        // genuinely nothing to resume. Leaving the card up offers the user a
+        // "resume" that can only dead-end, and it reports 0% because the part
+        // list it needs is exactly what just failed. Drop the stale local
+        // session and fall back to the normal upload control.
+        if (err instanceof ApiError && (err.status === 409 || err.status === 404)) {
+          clearUploadSession(id);
+          setPausedSession(null);
+          return;
+        }
+        // Anything else is transient -- keep the card, just don't claim progress.
+        setPausedPercent(0);
       });
     return () => {
       cancelled = true;
