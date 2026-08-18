@@ -2,10 +2,9 @@ import asyncio
 import traceback
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.v1.router import api_router
 from app.core.abuse import SecurityHeadersMiddleware
@@ -32,33 +31,58 @@ async def lifespan(_: FastAPI):
     yield
 
 
-class UnhandledErrorMiddleware(BaseHTTPMiddleware):
+class UnhandledErrorMiddleware:
     """Turn an unhandled exception into a normal 500 *response*.
 
     Starlette's ServerErrorMiddleware sits outside every user middleware,
     including CORS, so a 500 it produces carries no Access-Control-Allow-Origin
     header. A browser then cannot read the response at all: fetch rejects with
     an opaque network error and the console reports a CORS failure, hiding the
-    fact that the server answered and what it said. Debugging any 500 from the
-    client is impossible in that state.
+    fact that the server answered and what it said.
 
     Catching here -- inside CORSMiddleware -- means the response travels back
     out through it and gets the header, so the client sees a real 500 with a
     readable body. The traceback still goes to the host's logs.
+
+    Written as pure ASGI rather than BaseHTTPMiddleware on purpose:
+    BaseHTTPMiddleware runs the downstream app in a separate anyio task, which
+    detaches it from the event loop the request started on and breaks
+    loop-bound resources -- asyncpg raises "attached to a different loop" and
+    every database call fails. A plain ASGI class adds no task boundary.
     """
 
-    async def dispatch(self, request: Request, call_next):
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        response_started = False
+
+        async def send_wrapper(message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
         try:
-            return await call_next(request)
+            await self.app(scope, receive, send_wrapper)
         except Exception:
             print(
-                f"[unhandled] {request.method} {request.url.path}\n{traceback.format_exc()}",
+                f"[unhandled] {scope.get('method')} {scope.get('path')}",
                 flush=True,
             )
-            return JSONResponse(
+            print(traceback.format_exc(), flush=True)
+            if response_started:
+                # Headers are already on the wire; nothing left to replace.
+                raise
+            response = JSONResponse(
                 status_code=500,
                 content={"detail": "Internal server error. The failure was logged."},
             )
+            await response(scope, receive, send)
 
 
 app = FastAPI(title="ViralCut AI API", version="0.1.0", lifespan=lifespan)

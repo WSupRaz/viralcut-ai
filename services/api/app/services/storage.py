@@ -33,7 +33,21 @@ def _build_r2_client(endpoint_url: str):
         endpoint_url=endpoint_url,
         aws_access_key_id=settings.r2_access_key_id,
         aws_secret_access_key=settings.r2_secret_access_key,
-        config=BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"}),
+        config=BotoConfig(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            # botocore's default read timeout is 60s, which is fine for every
+            # call here except one: CompleteMultipartUpload makes the provider
+            # assemble the finished object from all its parts server-side, and
+            # for a several-hundred-megabyte file with dozens of parts that
+            # regularly runs past a minute. Timing out there raises
+            # ReadTimeoutError -- a BotoCoreError, not a ClientError -- which
+            # surfaced as an unhandled 500 while the assembly was still
+            # succeeding in the background.
+            connect_timeout=15,
+            read_timeout=300,
+            retries={"max_attempts": 3, "mode": "standard"},
+        ),
         region_name="auto",
     )
 

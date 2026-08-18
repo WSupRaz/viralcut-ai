@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -332,7 +332,13 @@ async def _finalize_assembled_upload(db: AsyncSession, *, source_video: SourceVi
     that a dropped response is routine, so assuming the first meaning strands a
     fully-uploaded object behind a row that can never leave upload_pending --
     and every retry adds another one. Ask storage which case it is."""
-    stored_size = object_size(source_video.r2_key_raw)
+    try:
+        stored_size = object_size(source_video.r2_key_raw)
+    except (ClientError, BotoCoreError) as exc:
+        raise StorageUnavailableError(
+            f"Could not reach storage to check the upload ({type(exc).__name__}). "
+            "Try finishing again in a moment."
+        ) from exc
     if stored_size is None:
         # Genuinely gone: nothing was ever assembled.
         raise UploadSessionExpiredError(str(source_video.id))
@@ -384,7 +390,15 @@ async def complete_source_video_upload(
             # Completing is idempotent: if the object is already assembled,
             # this is a repeat of a call that succeeded but lost its response.
             return await _finalize_assembled_upload(db, source_video=source_video)
-        raise
+        raise StorageUnavailableError(
+            f"Storage could not list the uploaded parts ({code or 'unknown error'}). "
+            "Your file is still uploaded -- try finishing again in a moment."
+        ) from exc
+    except BotoCoreError as exc:
+        raise StorageUnavailableError(
+            f"Could not reach storage to verify the upload ({type(exc).__name__}). "
+            "Your file is still uploaded -- try finishing again in a moment."
+        ) from exc
 
     by_number = {p["part_number"]: p for p in parts}
     missing = [n for n in range(1, part_count + 1) if n not in by_number]
@@ -423,6 +437,15 @@ async def complete_source_video_upload(
         raise StorageUnavailableError(
             f"Storage rejected the upload ({code or 'unknown error'}). "
             "Your file is still uploaded -- try finishing again in a moment."
+        ) from exc
+    except BotoCoreError as exc:
+        # ReadTimeoutError and friends. Assembling a large multipart object can
+        # outlast any client-side budget while still succeeding at the
+        # provider, so this is explicitly retryable: the next attempt finds the
+        # finished object and finalises via _finalize_assembled_upload.
+        raise StorageUnavailableError(
+            f"Storage is still assembling the upload ({type(exc).__name__}). "
+            "Your file is uploaded -- try finishing again in a moment."
         ) from exc
 
     if stored_size != source_video.size_bytes:
