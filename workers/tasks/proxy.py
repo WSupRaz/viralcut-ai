@@ -125,11 +125,12 @@ def generate_proxy(self, source_video_id: str, job_id: str) -> dict:
                 if fraction - last_written < 0.02:
                     return
                 last_written = fraction
+                # Stage stays a plain label: progress_pct is the one number
+                # the UI renders, and putting a second (transcode-relative)
+                # percentage in the stage text showed up as "Transcoding
+                # proxy (2%) (40%)".
                 _set_stage(
-                    session_factory,
-                    job_id,
-                    40 + int(fraction * 48),
-                    f"Transcoding proxy ({int(fraction * 100)}%)",
+                    session_factory, job_id, 40 + int(fraction * 48), "Transcoding proxy"
                 )
 
             _transcode_proxy(raw_path, proxy_path, float(duration), report)

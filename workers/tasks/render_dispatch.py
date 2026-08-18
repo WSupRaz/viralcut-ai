@@ -41,7 +41,12 @@ ENCODE_ARGS = [
     "-c:a", "aac", "-ar", "48000",
 ]
 
-RENDER_WORKER_TIMEOUT_SECONDS = 300.0
+# The render is a single synchronous HTTP call, so this has to cover the whole
+# job: waking a slept free-tier instance (30-60s), then Remotion compositing
+# every frame at concurrency 1. A ~220s output on a 0.1-CPU instance runs well
+# past the old 5-minute budget, which failed the export while the render was
+# still going. See the module docstring note on making this asynchronous.
+RENDER_WORKER_TIMEOUT_SECONDS = 1800.0
 
 
 def _set_job_stage(session_factory, job_id: uuid.UUID, progress_pct: int, stage: str) -> None:

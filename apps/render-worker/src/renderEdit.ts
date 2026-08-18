@@ -56,5 +56,17 @@ export async function renderEditVideo({
     codec: "h264",
     outputLocation: output,
     inputProps,
+    // Remotion defaults concurrency to the machine's core count, spawning one
+    // headless Chromium per worker. Each is worth a few hundred MB, which a
+    // 512MB free-tier instance cannot hold -- the render is killed with no
+    // error, exactly like the ffmpeg thread-count problem in the proxy task.
+    // Slower, but it finishes. Raise this on a bigger instance.
+    concurrency: 1,
+    // Cap how long a single frame may hang rather than letting one stuck
+    // frame consume the whole request budget.
+    timeoutInMilliseconds: 120_000,
+    // Fewer decoded source frames held in memory at once. The default cache
+    // is sized for machines with far more headroom than this one.
+    offthreadVideoCacheSizeInBytes: 64 * 1024 * 1024,
   });
 }
